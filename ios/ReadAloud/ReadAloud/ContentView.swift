@@ -8,6 +8,10 @@
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject private var navigationState = NavigationState.shared
+    @ObservedObject private var playbackManager = GlobalPlaybackManager.shared
+    @State private var selectedDocument: Document? = nil
+    
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -27,13 +31,34 @@ struct ContentView: View {
             }
             .navigationBarHidden(true)
             .background(Color(.systemGroupedBackground).edgesIgnoringSafeArea(.all))
+            // 添加导航目标 - 这是关键部分
+            .navigationDestination(isPresented: $navigationState.shouldNavigateToReader) {
+                if let doc = playbackManager.currentDocument {
+                    DocumentReaderView(
+                        documentTitle: doc.title,
+                        document: doc,
+                        viewModel: DocumentsViewModel()
+                    )
+                }
+            }
         }
-        // 添加右下角的浮动球（当有内容正在播放时显示）
+        // 添加右下角的浮动球（当有内容在播放且不在朗读界面时显示）
         .overlay(
-            FloatingPlayerButton()
-                .padding(),
+            Group {
+                if !navigationState.isInReaderView && playbackManager.isPlaying {
+                    FloatingPlayerButton()
+                        .padding(.bottom, 120)
+                        .padding(.trailing, 30)
+                }
+            },
             alignment: .bottomTrailing
         )
+        .onChange(of: navigationState.isInReaderView) { newValue in
+            print("Navigation state changed: isInReaderView = \(newValue)")
+        }
+        .onChange(of: playbackManager.isPlaying) { newValue in
+            print("Playback state changed: isPlaying = \(newValue)")
+        }
     }
 }
 
@@ -512,61 +537,44 @@ struct BottomTabBar: View {
 // 浮动播放按钮（当有内容在播放时显示）
 struct FloatingPlayerButton: View {
     @ObservedObject private var playbackManager = GlobalPlaybackManager.shared
+    @ObservedObject private var navigationState = NavigationState.shared
+    @State private var animationAmount = 1.0
     
     var body: some View {
-        if playbackManager.currentDocument != nil {
+        if playbackManager.currentDocument != nil && playbackManager.isPlaying {
             Button(action: {
-                // 打开播放界面
-                if let doc = playbackManager.currentDocument {
-                    // 这里需要导航到文档阅读界面
-                }
+                // 激活导航标志，触发导航
+                navigationState.shouldNavigateToReader = true
             }) {
+                // 增大浮动球并添加动态效果
                 ZStack {
+                    // 外层脉冲圆 - 增大波纹效果
                     Circle()
-                        .fill(Color.white)
-                        .frame(width: 50, height: 50)
-                        .shadow(radius: 3)
+                        .fill(Color.blue.opacity(0.2))
+                        .frame(width: 70, height: 70)
+                        .scaleEffect(animationAmount)
+                        .opacity(2 - animationAmount)
+                        .animation(
+                            Animation.easeInOut(duration: 2.0)
+                                .repeatForever(autoreverses: false),
+                            value: animationAmount
+                        )
                     
-                    HStack(spacing: 8) {
-                        // 显示播放/暂停图标
-                        Button(action: {
-                            if playbackManager.isPlaying {
-                                playbackManager.pausePlayback()
-                            } else {
-                                playbackManager.resumePlayback()
-                            }
-                        }) {
-                            Image(systemName: playbackManager.isPlaying ? "pause.fill" : "play.fill")
-                                .foregroundColor(.blue)
-                                .padding(5)
-                        }
-                        
-                        // 显示文档封面/标题
-                        if let doc = playbackManager.currentDocument,
-                           let coverData = doc.coverImageData,
-                           let uiImage = UIImage(data: coverData) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 30, height: 30)
-                                .clipShape(Circle())
-                        } else {
-                            Text(playbackManager.currentDocument?.title.prefix(1) ?? "")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 30, height: 30)
-                                .background(Color.blue)
-                                .clipShape(Circle())
-                        }
-                    }
-                    .padding(5)
-                    .background(Color.white.opacity(0.9))
-                    .cornerRadius(25)
+                    // 主背景圆
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 70, height: 70)
+                    
+                    // 动态音波图标
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 28))
+                        .foregroundColor(.white)
                 }
             }
             .contentShape(Circle())
-            .onTapGesture {
-                // 点击打开阅读界面
+            .onAppear {
+                // 启动动画 - 增大动画幅度
+                animationAmount = 1.8
             }
         } else {
             EmptyView()
