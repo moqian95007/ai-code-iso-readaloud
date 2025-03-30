@@ -30,7 +30,7 @@ struct DocumentReaderView: View {
     // 使用懒加载获取synthesizer，避免在视图初始化时创建
     private var synthesizer: SpeechSynthesizer {
         if playbackManager.currentDocument?.id == document.id,
-           let existingSynthesizer = playbackManager.synthesizer {
+           let existingSynthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
             return existingSynthesizer
         } else {
             let newSynthesizer = SpeechSynthesizer()
@@ -51,7 +51,7 @@ struct DocumentReaderView: View {
             static var lastChapterCount: Int = 0
         }
         
-        if let synthesizer = playbackManager.synthesizer {
+        if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
             let index = synthesizer.getCurrentChapterIndex()
             
             // 只在章节索引变化时才调用 getChapters
@@ -80,24 +80,12 @@ struct DocumentReaderView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
+        // 分解为两个部分
+        let contentStack = createContentStack()
+        
+        return VStack(spacing: 0) {
             // 顶部导航栏 - 显示文档标题
-            HStack {
-                Spacer()
-                
-                // 突出显示文档标题
-                Text(documentTitle)
-                    .font(.system(size: 18, weight: .bold))  // 更大更粗的字体
-                    .foregroundColor(.black)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.vertical, 10)  // 增加上下内边距
-                
-                Spacer()
-            }
-            .padding(.horizontal)
-            .background(Color.white)  // 确保背景是白色
-            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1) // 添加轻微阴影
+            createHeaderView()
             
             // 选择语音包区域
             VoiceSelectionView(selectedVoice: $selectedVoice)
@@ -105,697 +93,801 @@ struct DocumentReaderView: View {
                 .background(Color.white)
             
             // 朗读内容区域
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        // 显示当前朗读的文本
-                        if !isDocumentLoaded {
-                            // 加载状态
-                            ProgressView("正在加载文档...")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .padding(50)
-                        } else if let synth = playbackManager.synthesizer, synth.currentText.starts(with: "文本提取失败") {
-                            // 文本提取失败的提示
-                            VStack(spacing: 20) {
-                                Image(systemName: "exclamationmark.triangle")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.orange)
-                                    .padding(.bottom, 5)
-                                
-                                Text(synth.currentText)
-                                    .font(.system(size: 16))
-                                    .multilineTextAlignment(.center)
-                                    .foregroundColor(.red)
-                                
-                                // 解决方案建议
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("可能的解决方案:")
-                                        .font(.headline)
-                                        .padding(.top, 5)
-                                    
-                                    ForEach(["确保文件格式正确", "尝试转换为TXT或PDF格式", "重新导入文档"], id: \.self) { suggestion in
-                                        HStack(alignment: .top) {
-                                            Image(systemName: "checkmark.circle")
-                                                .foregroundColor(.green)
-                                            Text(suggestion)
-                                        }
-                                    }
-                                }
-                                .padding()
-                                .background(Color.green.opacity(0.1))
-                                .cornerRadius(10)
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.white)
-                            .cornerRadius(10)
-                        } else if let synth = playbackManager.synthesizer {
-                            VStack(alignment: .leading) {
-                                // 添加章节标题显示
-                                if !synth.getChapters().isEmpty {
-                                    // 只获取一次章节索引
-                                    let chapterIndex = synth.getCurrentChapterIndex()
-                                    // 缓存当前章节列表
-                                    let currentChapters = synth.getChapters()
-                                    
-                                    if chapterIndex >= 0 && chapterIndex < currentChapters.count {
-                                        Text(currentChapters[chapterIndex].title)
-                                            .font(.headline)
-                                            .foregroundColor(.blue)
-                                            .padding(.bottom, 5)
-                                            .id("chapter_title_\(chapterIndex)")
-                                    }
-                                }
-                                
-                                if synth.fullText.isEmpty {
-                                    // 文本为空的情况
-                                    Text("正在加载文档内容...")
-                                        .foregroundColor(.gray)
-                                        .italic()
-                                } else if !synth.getChapters().isEmpty {
-                                    let chapterIndex = synth.getCurrentChapterIndex()
-                                    if chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
-                                        let chapter = synth.getChapters()[chapterIndex]
-                                        let chapterContent = chapter.extractContent(from: synth.fullText)
-                                        
-                                        // 检查章节内容是否为空
-                                        let trimmedContent = chapterContent.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if !trimmedContent.isEmpty {
-                                            // 创建高亮文本
-                                            VStack(alignment: .leading, spacing: 0) {
-                                                // 显示章节内容
-                                                if synth.getCurrentChapterContent().isEmpty && !synth.fullText.isEmpty {
-                                                    // 备用显示方式，避免无文本情况
-                                                    Text("正在加载章节内容...")
-                                                        .font(.system(size: fontSize.size))
-                                                        .foregroundColor(.gray)
-                                                        .padding()
-                                                    
-                                                    // 尝试直接显示当前章节
-                                                    let chapterIndex = synth.getCurrentChapterIndex()
-                                                    if chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
-                                                        let chapter = synth.getChapters()[chapterIndex]
-                                                        if chapter.startIndex < synth.fullText.count && chapter.endIndex <= synth.fullText.count {
-                                                            let startIdx = synth.fullText.index(synth.fullText.startIndex, offsetBy: chapter.startIndex)
-                                                            let endIdx = synth.fullText.index(synth.fullText.startIndex, offsetBy: chapter.endIndex)
-                                                            let chapterText = String(synth.fullText[startIdx..<endIdx])
-                                                            
-                                                            if !chapterText.isEmpty {
-                                                                Text(chapterText)
-                                                                    .font(.system(size: fontSize.size))
-                                                                    .padding()
-                                                                    .id("direct_chapter_text_\(chapterIndex)")
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    // 标准的高亮文本显示
-                                                    HighlightedTextView(
-                                                        text: chapterContent,
-                                                        highlightStart: synth.currentReadingCharacterIndex,
-                                                        highlightLength: synth.currentReadingCharacterCount,
-                                                        isPlaying: synth.isPlaying,
-                                                        fontSize: fontSize.size,
-                                                        onTapToSpeak: { tapRatio in
-                                                            // 处理点击事件
-                                                            handleTextTapByRatio(chapter: chapter, tapRatio: tapRatio)
-                                                        }
-                                                    )
-                                                    .id("chapter_content_\(chapterIndex)_highlight_\(synth.currentReadingCharacterIndex)")
-                                                    .onReceive(synth.objectWillChange) { _ in
-                                                        // 强制视图刷新
-                                                        print("【HighlightedTextView】接收到更新通知")
-                                                    }
-                                                }
-                                            }
-                                            .frame(minHeight: 400) // 确保有足够的垂直空间
-                                            .background(Color.white.opacity(0.01)) // 添加微小背景以确保整个区域可见
-                                        } else {
-                                            // 章节内容为空时显示友好提示
-                                            VStack(spacing: 10) {
-                                                Image(systemName: "doc.text.magnifyingglass")
-                                                    .font(.system(size: 40))
-                                                    .foregroundColor(.orange)
-                                                
-                                                Text("章节 \(chapter.title) 内容为空")
-                                                    .font(.headline)
-                                                    .foregroundColor(.orange)
-                                                
-                                                Text("此章节可能是目录或分隔符，您可以跳转到下一章继续阅读。")
-                                                    .font(.subheadline)
-                                                    .foregroundColor(.gray)
-                                                    .multilineTextAlignment(.center)
-                                                    .padding(.horizontal)
-                                                
-                                                // 添加快速跳转按钮
-                                                if chapterIndex < synth.getChapters().count - 1 {
-                                                    Button(action: {
-                                                        synth.nextChapter()
-                                                    }) {
-                                                        HStack {
-                                                            Text("跳转到下一章")
-                                                            Image(systemName: "arrow.right.circle.fill")
-                                                        }
-                                                        .padding(.horizontal, 20)
-                                                        .padding(.vertical, 10)
-                                                        .background(Color.blue)
-                                                        .foregroundColor(.white)
-                                                        .cornerRadius(20)
-                                                    }
-                                                    .padding(.top)
-                                                }
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(30)
-                                            .background(Color.orange.opacity(0.1))
-                                            .cornerRadius(10)
-                                        }
-                                    } else {
-                                        // 章节索引无效的情况
-                                        Text("章节信息错误，无法显示内容")
-                                            .foregroundColor(.red)
-                                    }
-                                } else {
-                                    // 没有章节但有文本内容时，显示当前位置附近的一大段文本
-                                    // 显示更多内容而不仅仅是500字符
-                                    let currentPosition = synth.currentPosition
-                                    let startIndex = max(0, Int(currentPosition * Double(synth.fullText.count)) - 1000)
-                                    let endIndex = min(synth.fullText.count, startIndex + 3000) // 显示3000字符而不是500
-                                    
-                                    let textStartIndex = synth.fullText.index(synth.fullText.startIndex, offsetBy: startIndex)
-                                    let textEndIndex = synth.fullText.index(synth.fullText.startIndex, offsetBy: endIndex)
-                                    let displayText = String(synth.fullText[textStartIndex..<textEndIndex])
-                                    
-                                    Text(displayText)
-                                        .font(.system(size: fontSize.size))
-                                        .foregroundColor(.black)
-                                        .lineSpacing(5)
-                                        .background(Color(.systemYellow).opacity(0.1))
-                                }
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.white)
-                            .cornerRadius(10)
-                        } else {
-                            Text("无法加载文档内容")
-                                .foregroundColor(.gray)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.white)
-                                .cornerRadius(10)
-                        }
-                    }
-                    .padding()
-                    .onChange(of: currentChapterIndex) { newChapterIndex in
-                        // 检测章节变化，自动滚动到章节开头
-                        if activeChapterIndex != newChapterIndex {
-                            activeChapterIndex = newChapterIndex
-                            
-                            // 滚动到章节标题位置
-                            withAnimation {
-                                proxy.scrollTo("chapter_title_\(newChapterIndex)", anchor: .top)
-                            }
-                            
-                            print("【滚动控制】检测到章节变化，滚动到章节\(newChapterIndex + 1)开头")
-                        }
-                    }
+            contentStack
+            
+            // 底部控制区域
+            createControlsView()
+        }
+        .onAppear {
+            handleOnAppear()
+        }
+        .onDisappear {
+            handleOnDisappear()
+        }
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+            if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                handleHighlightUpdate()
+            }
+        }
+    }
+    
+    // 拆分头部视图为单独函数
+    private func createHeaderView() -> some View {
+        HStack {
+            Spacer()
+            
+            // 突出显示文档标题
+            Text(documentTitle)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.black)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.vertical, 10)
+            
+            Spacer()
+        }
+        .padding(.horizontal)
+        .background(Color.white)
+        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+    }
+    
+    // 拆分内容部分为单独函数
+    private func createContentStack() -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // 这里放置原来的内容显示逻辑
+                    createContentView()
                 }
                 .padding()
-                .onAppear {
-                    // 在这里保存滚动视图代理
-                    self.currentScrollViewProxy = proxy
+                .onChange(of: currentChapterIndex) { newChapterIndex in
+                    handleChapterChange(proxy: proxy, newIndex: newChapterIndex)
+                }
+            }
+            .padding()
+            .onAppear {
+                self.currentScrollViewProxy = proxy
+                
+                // 延迟执行初始化滚动
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    handleInitialScroll(proxy: proxy)
+                }
+            }
+        }
+        .background(Color(.systemGray6))
+    }
+    
+    // 内容视图的逻辑
+    private func createContentView() -> some View {
+        Group {
+            if !isDocumentLoaded {
+                // 加载状态
+                ProgressView("正在加载文档...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(50)
+            } else if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer, 
+                      synth.currentText.starts(with: "文本提取失败") {
+                // 文本提取失败时的视图
+                createErrorView(message: synth.currentText)
+            } else if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                // 正常显示内容
+                createTextContentView(synth: synth)
+            } else {
+                // 无法加载文档内容
+                Text("无法加载文档内容")
+                    .foregroundColor(.gray)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(10)
+            }
+        }
+    }
+    
+    // 控制区域视图
+    private func createControlsView() -> some View {
+        VStack(spacing: 15) {
+            // 原来的控制区域代码
+            // 进度条和前进/后退按钮...
+            createProgressSliderView()
+            
+            // 播放控制按钮行...
+            createPlayControlsView()
+            
+            // 章节信息...
+            createChapterInfoView()
+            
+            // 其他控制按钮...
+            createExtraControlsView()
+        }
+        .padding()
+        .background(Color.white)
+    }
+    
+    private func handleOnAppear() {
+        print("DocumentReaderView appeared - setting isInReaderView to true")
+        ReadAloudNavigationState.shared.isInReaderView = true
+        
+        // 先标记为未加载状态，显示加载指示器
+        isDocumentLoaded = false
+        
+        // 使用DispatchQueue确保视图已完全渲染后再执行这些操作
+        DispatchQueue.main.async {
+            // 设置当前文档
+            playbackManager.currentDocument = document
+            playbackManager.currentSynthesizer = synthesizer
+            
+            // 加载文档
+            print("开始加载文档: \(document.title)")
+            
+            // 显示初步加载和章节分析提示
+            DispatchQueue.main.async {
+                // 更新UI提示，显示正在处理
+                self.loadingStatusText = "正在提取文本..."
+            }
+            
+            // 使用更高优先级的队列加载文档
+            synthesizer.loadDocument(document, viewModel: viewModel, onProgress: { progress, message in
+                // 更新加载进度UI
+                DispatchQueue.main.async {
+                    self.loadingProgress = progress
+                    self.loadingStatusText = message
+                }
+            })
+            
+            // 定期检查加载状态，而不是固定延迟
+            var checkCount = 0
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
+                checkCount += 1
+                
+                // 检查文本是否已加载或者超时
+                if !synthesizer.fullText.isEmpty || checkCount > 20 {
+                    timer.invalidate()
                     
-                    // 延迟一点执行，确保文档加载完成
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        print("【视图刷新】文档阅读视图已出现，强制刷新显示")
+                    // 强制更新UI
+                    DispatchQueue.main.async {
+                        // 确保文本显示更新
+                        synthesizer.updateCurrentTextDisplay()
+                        // 标记文档已加载
+                        isDocumentLoaded = true
                         
-                        // 确保章节内容已正确加载
-                        if self.synthesizer.currentText.isEmpty && !self.synthesizer.fullText.isEmpty {
-                            print("【视图刷新】检测到内容未显示，尝试强制更新显示")
-                            self.synthesizer.updateCurrentTextDisplay()
-                            
-                            // 再次延迟更新，确保内容显示
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                // 尝试重新获取当前章节并显示
-                                let currentIndex = self.synthesizer.getCurrentChapterIndex()
-                                if currentIndex >= 0 && currentIndex < self.synthesizer.getChapters().count {
-                                    // 重新跳转到当前章节以触发显示
-                                    self.synthesizer.jumpToChapter(currentIndex)
-                                    print("【视图刷新】强制跳转到当前章节: \(currentIndex + 1)")
-                                }
-                                
-                                // 强制更新UI
-                                self.synthesizer.objectWillChange.send()
-                            }
+                        // 打印调试信息
+                        print("文档加载状态: isDocumentLoaded=\(isDocumentLoaded)")
+                        print("文本内容状态: fullText长度=\(synthesizer.fullText.count)")
+                        print("文本内容状态: currentText长度=\(synthesizer.currentText.count)")
+                        
+                        // 显示文本内容的前20个字符用于调试
+                        if !synthesizer.currentText.isEmpty {
+                            let previewText = String(synthesizer.currentText.prefix(20))
+                            print("文本前20个字符: \"\(previewText)\"")
                         }
                     }
                 }
             }
-            .background(Color(.systemGray6))
+        }
+        
+        // 添加定时器定期更新当前章节索引
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+            if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                let newIndex = synthesizer.getCurrentChapterIndex()
+                if currentChapterIndex != newIndex {
+                    currentChapterIndex = newIndex
+                    print("【章节状态】章节已更新: \(newIndex+1)")
+                }
+            } else {
+                // 如果synthesizer已不存在，停止定时器
+                timer.invalidate()
+            }
+        }
+    }
+    
+    private func handleOnDisappear() {
+        print("DocumentReaderView disappeared - setting isInReaderView to false")
+        ReadAloudNavigationState.shared.isInReaderView = false
+        
+        // 取消定时关闭功能
+        if selectedTimer != .off {
+            // 取消定时器的代码
+            selectedTimer = .off
+        }
+        
+        // 只有在当前文档不在播放时才停止朗读
+        if !playbackManager.isPlaying {
+            DispatchQueue.main.async {
+                if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    synth.stopSpeaking()
+                }
+                playbackManager.currentSynthesizer = nil
+                playbackManager.currentDocument = nil
+            }
+        }
+    }
+    
+    private func handleHighlightUpdate() {
+        if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer, synth.isPlaying {
+            print("---高亮更新通知---")
+            print("高亮位置: \(synth.currentReadingCharacterIndex)")
+            print("高亮长度: \(synth.currentReadingCharacterCount)")
+            print("是否正在播放: \(synth.isPlaying)")
             
-            // 底部控制区域
-            VStack(spacing: 15) {
-                // 进度条和前进/后退按钮
-                HStack(alignment: .center) {
-                    // 后退15秒按钮
-                    Button(action: {
-                        playbackManager.synthesizer?.skipBackward()
-                    }) {
-                        Image(systemName: "gobackward.15")
-                            .font(.system(size: 20))
-                            .foregroundColor(.gray)
+            // 获取高亮的具体文本
+            let chapterContent = synth.getCurrentChapterContent()
+            if !chapterContent.isEmpty && 
+               synth.currentReadingCharacterIndex < chapterContent.count &&
+               synth.currentReadingCharacterIndex + synth.currentReadingCharacterCount <= chapterContent.count {
+                
+                let start = chapterContent.index(chapterContent.startIndex, 
+                                               offsetBy: synth.currentReadingCharacterIndex)
+                let end = chapterContent.index(start, 
+                                             offsetBy: synth.currentReadingCharacterCount)
+                if start < end {
+                    let highlightedText = chapterContent[start..<end]
+                    print("正在朗读: \"\(highlightedText)\"")
+                }
+            }
+        }
+    }
+    
+    private func handleChapterChange(proxy: ScrollViewProxy, newIndex: Int) {
+        // 检测章节变化，自动滚动到章节开头
+        if activeChapterIndex != newIndex {
+            activeChapterIndex = newIndex
+            
+            // 滚动到章节标题位置
+            withAnimation {
+                proxy.scrollTo("chapter_title_\(newIndex)", anchor: .top)
+            }
+            
+            print("【滚动控制】检测到章节变化，滚动到章节\(newIndex + 1)开头")
+        }
+    }
+    
+    private func handleInitialScroll(proxy: ScrollViewProxy) {
+        print("【视图刷新】文档阅读视图已出现，强制刷新显示")
+        
+        // 确保章节内容已正确加载
+        if self.synthesizer.currentText.isEmpty && !self.synthesizer.fullText.isEmpty {
+            print("【视图刷新】检测到内容未显示，尝试强制更新显示")
+            self.synthesizer.updateCurrentTextDisplay()
+            
+            // 再次延迟更新，确保内容显示
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                // 尝试重新获取当前章节并显示
+                let currentIndex = self.synthesizer.getCurrentChapterIndex()
+                if currentIndex >= 0 && currentIndex < self.synthesizer.getChapters().count {
+                    // 重新跳转到当前章节以触发显示
+                    self.synthesizer.jumpToChapter(currentIndex)
+                    print("【视图刷新】强制跳转到当前章节: \(currentIndex + 1)")
+                }
+                
+                // 强制更新UI
+                self.synthesizer.objectWillChange.send()
+            }
+        }
+    }
+    
+    private func createErrorView(message: String) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 50))
+                .foregroundColor(.orange)
+                .padding(.bottom, 5)
+            
+            Text(message)
+                .font(.system(size: 16))
+                .multilineTextAlignment(.center)
+                .foregroundColor(.red)
+            
+            // 解决方案建议
+            VStack(alignment: .leading, spacing: 10) {
+                Text("可能的解决方案:")
+                    .font(.headline)
+                    .padding(.top, 5)
+                
+                ForEach(["确保文件格式正确", "尝试转换为TXT或PDF格式", "重新导入文档"], id: \.self) { suggestion in
+                    HStack(alignment: .top) {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundColor(.green)
+                        Text(suggestion)
                     }
-                    .padding(.trailing, 5)
+                }
+            }
+            .padding()
+            .background(Color.green.opacity(0.1))
+            .cornerRadius(10)
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .cornerRadius(10)
+    }
+    
+    private func createTextContentView(synth: SpeechSynthesizer) -> some View {
+        VStack(alignment: .leading) {
+            // 添加章节标题显示
+            let chapters = synth.getChapters()
+            if !chapters.isEmpty {
+                // 获取章节索引
+                let chapterIndex = synth.getCurrentChapterIndex()
+                
+                // 检查索引有效性
+                if chapterIndex >= 0 && chapterIndex < chapters.count {
+                    let chapterTitle = chapters[chapterIndex].title
                     
-                    // 进度条 - 使用章节内部进度
-                    if let synth = playbackManager.synthesizer, !synth.getChapters().isEmpty {
-                        VStack(spacing: 2) {
-                            // 添加章节指示
-                            let chapterIndex = synth.getCurrentChapterIndex()
-                            if chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
-                                Text("当前章：\(synth.getChapters()[chapterIndex].title)")
-                                    .font(.caption2)
+                    Text(chapterTitle)
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                        .padding(.bottom, 5)
+                        .id("chapter_title_\(chapterIndex)")
+                }
+            }
+            
+            if synth.fullText.isEmpty {
+                // 文本为空的情况
+                Text("正在加载文档内容...")
+                    .foregroundColor(.gray)
+                    .italic()
+            } else if !chapters.isEmpty {
+                let chapterIndex = synth.getCurrentChapterIndex()
+                if chapterIndex >= 0 && chapterIndex < chapters.count {
+                    let chapter = chapters[chapterIndex]
+                    let chapterContent = chapter.extractContent(from: synth.fullText)
+                    
+                    // 检查章节内容是否为空
+                    let trimmedContent = chapterContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedContent.isEmpty {
+                        // 创建高亮文本
+                        VStack(alignment: .leading, spacing: 0) {
+                            // 显示章节内容
+                            if synth.getCurrentChapterContent().isEmpty && !synth.fullText.isEmpty {
+                                // 备用显示方式，避免无文本情况
+                                Text("正在加载章节内容...")
+                                    .font(.system(size: fontSize.size))
                                     .foregroundColor(.gray)
-                            }
-                            
-                            // 章节内进度条 - 增强保护
-                            ProgressSlider(value: Binding(
-                                get: { synth.getCurrentChapterInternalProgress() },
-                                set: { position in
-                                    // 锁定当前章节索引
-                                    let currentIndex = synth.getCurrentChapterIndex()
-                                    
-                                    // 如果位置接近1.0，限制最大值
-                                    let safePosition = position >= 0.98 ? 0.95 : position
-                                    
-                                    // 设置进度
-                                    synth.seekTo(position: safePosition)
-                                    
-                                    // 强制确保章节不会改变
-                                    DispatchQueue.main.async {
-                                        // 再次检查章节是否变化
-                                        if currentIndex != synth.getCurrentChapterIndex() {
-                                            print("【UI保护】检测到章节变化，强制恢复到原章节")
-                                            synth.jumpToChapter(currentIndex)
-                                            
-                                            // 强制更新UI
-                                            synth.objectWillChange.send()
+                                    .padding()
+                                
+                                // 尝试直接显示当前章节
+                                let chapterIndex = synth.getCurrentChapterIndex()
+                                if chapterIndex >= 0 && chapterIndex < chapters.count {
+                                    let chapter = chapters[chapterIndex]
+                                    if chapter.startIndex < synth.fullText.count && chapter.endIndex <= synth.fullText.count {
+                                        let startIdx = synth.fullText.index(synth.fullText.startIndex, offsetBy: chapter.startIndex)
+                                        let endIdx = synth.fullText.index(synth.fullText.startIndex, offsetBy: chapter.endIndex)
+                                        let chapterText = String(synth.fullText[startIdx..<endIdx])
+                                        
+                                        if !chapterText.isEmpty {
+                                            Text(chapterText)
+                                                .font(.system(size: fontSize.size))
+                                                .padding()
+                                                .id("direct_chapter_text_\(chapterIndex)")
                                         }
-                                    }
-                                }
-                            )).id("progress_\(chapterIndex)")
-                        }
-                    } else {
-                        // 无章节时使用全局进度
-                        ProgressSlider(value: Binding(
-                            get: { playbackManager.synthesizer?.currentPosition ?? 0 },
-                            set: { position in
-                                playbackManager.synthesizer?.seekTo(position: position)
-                            }
-                        ))
-                    }
-                    
-                    // 前进15秒按钮
-                    Button(action: {
-                        playbackManager.synthesizer?.skipForward()
-                    }) {
-                        Image(systemName: "goforward.15")
-                            .font(.system(size: 20))
-                            .foregroundColor(.gray)
-                    }
-                    .padding(.leading, 5)
-                }
-                .padding(.horizontal)
-                
-                // 播放控制按钮行 - 平衡调整按钮间距
-                HStack {
-                    // 水平方向留出适当空间
-                    Spacer()
-                        .frame(width: 5)
-                    
-                    // 倍速控制 - 位于左侧边缘和上一首按钮中间
-                    Button(action: {
-                        showSpeedOptions.toggle()
-                    }) {
-                        VStack(spacing: 5) {
-                            Image(systemName: "speedometer")
-                                .font(.system(size: 22))
-                            Text("\(String(format: "%.1f", playbackSpeed))x")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundColor(.gray)
-                    }
-                    .popover(isPresented: $showSpeedOptions) {
-                        SpeedOptionsView(playbackSpeed: $playbackSpeed, synthesizer: playbackManager.synthesizer)
-                    }
-                    
-                    // 弹性空间，但不是完全弹性
-                    Spacer()
-                        .frame(minWidth: 10, maxWidth: 30)
-                    
-                    // 上一首按钮 - 修改为上一章
-                    Button(action: {
-                        if let synthesizer = playbackManager.synthesizer {
-                            synthesizer.previousChapter()
-                            // 记录跳转动作
-                            print("【UI交互】上一章按钮被点击")
-                        } else {
-                            playPreviousDocument()
-                        }
-                    }) {
-                        Image(systemName: "backward.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.horizontal, 8)
-                    
-                    // 播放/暂停按钮
-                    Button(action: {
-                        if playbackManager.isPlaying {
-                            playbackManager.synthesizer?.pauseSpeaking()
-                            playbackManager.isPlaying = false
-                        } else {
-                            if let synth = playbackManager.synthesizer {
-                                if synth.fullText.isEmpty {
-                                    print("无法播放：文本为空")
-                                } else {
-                                    synth.resumeSpeaking()
-                                    if !synth.isPlaying {
-                                        synth.startSpeaking(from: synth.currentPosition)
-                                    }
-                                    playbackManager.isPlaying = true
-                                    
-                                    if synth.currentText.isEmpty {
-                                        synth.updateCurrentTextDisplay()
-                                    }
-                                }
-                            }
-                        }
-                    }) {
-                        Image(systemName: playbackManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 56))
-                            .foregroundColor(.blue)
-                    }
-                    
-                    // 下一首按钮 - 修改为下一章
-                    Button(action: {
-                        if let synthesizer = playbackManager.synthesizer {
-                            synthesizer.nextChapter()
-                            // 记录跳转动作
-                            print("【UI交互】下一章按钮被点击")
-                        } else {
-                            playNextDocument()
-                        }
-                    }) {
-                        Image(systemName: "forward.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.horizontal, 8)
-                    
-                    // 弹性空间，但不是完全弹性
-                    Spacer()
-                        .frame(minWidth: 10, maxWidth: 30)
-                    
-                    // 播放模式 - 位于右侧边缘和下一首按钮中间
-                    Button(action: {
-                        let allModes = PlayMode.allCases
-                        if let currentIndex = allModes.firstIndex(of: playMode),
-                           let nextMode = allModes[safe: (currentIndex + 1) % allModes.count] {
-                            playMode = nextMode
-                        }
-                    }) {
-                        VStack(spacing: 5) {
-                            Image(systemName: playMode == .sequential ? "repeat" : (playMode == .loop ? "repeat.1" : "1.circle"))
-                                .font(.system(size: 22))
-                            Text(playMode == .sequential ? "顺序" : (playMode == .loop ? "循环" : "单章"))
-                                .font(.system(size: 12))
-                        }
-                        .foregroundColor(.gray)
-                    }
-                    
-                    // 水平方向留出适当空间
-                    Spacer()
-                        .frame(width: 5)
-                }
-                .padding(.horizontal, 5)  // 整体水平内边距较小
-                .padding(.vertical, 5)
-                
-                // 显示当前章节信息（无按钮，仅显示）
-                HStack {
-                    if let synthesizer = playbackManager.synthesizer, !synthesizer.getChapters().isEmpty {
-                        ChapterIndicator()
-                            .padding(.trailing, 4)
-                        
-                        Text(currentChapterDisplayText)
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                }
-                .id(currentChapterIndex) // 强制在章节索引变化时刷新视图
-                .padding(.top, 5)
-                
-                // 其他控制按钮 - 完全重写
-                HStack(spacing: 30) {
-                    // 章节列表按钮
-                    Button(action: {
-                        print("【UI交互】章节按钮被点击")
-                        
-                        // 强制刷新章节列表
-                        if let synthesizer = playbackManager.synthesizer {
-                            print("【UI交互】检查章节状态: 共\(synthesizer.getChapters().count)章")
-                            
-                            // 确保章节数据已正确加载
-                            if synthesizer.getChapters().isEmpty && !synthesizer.fullText.isEmpty {
-                                print("【UI交互】章节为空但文本不为空，尝试重新分析")
-                                // 对于大文本，异步处理以避免UI卡顿
-                                DispatchQueue.global(qos: .userInitiated).async {
-                                    let result = ChapterSegmenter.splitTextIntoParagraphs(synthesizer.fullText)
-                                    
-                                    // 过滤掉无效章节
-                                    let filteredChapters = result.chapters.filter { chapter in
-                                        let contentLength = chapter.endIndex - chapter.startIndex
-                                        let isValidContent = contentLength > 100
-                                        let isFormatPrefix = chapter.title.hasPrefix("Chapter_") && contentLength < 100
-                                        
-                                        return isValidContent && !isFormatPrefix
-                                    }
-                                    
-                                    DispatchQueue.main.async {
-                                        synthesizer.setChapters(filteredChapters)
-                                        synthesizer.setParagraphs(result.paragraphs)
-                                        print("【UI交互】重新分析完成，识别到\(filteredChapters.count)个章节")
-                                        
-                                        // 确保UI刷新后再显示章节列表
-                                        synthesizer.objectWillChange.send()
-                                        showChapterList = true
                                     }
                                 }
                             } else {
-                                // 章节数据已存在，直接显示
-                                showChapterList = true
-                            }
-                        } else {
-                            print("【UI交互】警告：synthesizer未初始化")
-                            showChapterList = true
-                        }
-                    }) {
-                        VStack {
-                            Image(systemName: "list.bullet")
-                                .font(.system(size: 22))
-                            Text("章节")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundColor(.gray)
-                    }
-                    .popover(isPresented: $showChapterList, arrowEdge: .bottom) {
-                        if let synthesizer = playbackManager.synthesizer {
-                            VStack {
-                                Text("章节列表 (\(synthesizer.getChapters().count)章)")
-                                    .font(.headline)
-                                    .padding()
-                                
-                                ChapterListView(synthesizer: synthesizer, showChapterList: $showChapterList)
-                                    .onAppear {
-                                        print("【UI交互】章节列表弹窗正在展示，章节数：\(synthesizer.getChapters().count)")
+                                // 标准的高亮文本显示
+                                HighlightedTextView(
+                                    text: chapterContent,
+                                    highlightStart: synth.currentReadingCharacterIndex,
+                                    highlightLength: synth.currentReadingCharacterCount,
+                                    isPlaying: synth.isPlaying,
+                                    fontSize: fontSize.size,
+                                    onTapToSpeak: { tapRatio in
+                                        // 处理点击事件
+                                        handleTextTapByRatio(chapter: chapter, tapRatio: tapRatio)
                                     }
-                            }
-                            .frame(minWidth: 300, minHeight: 400)
-                        } else {
-                            Text("无法加载章节信息")
-                                .frame(minWidth: 300, minHeight: 100)
-                                .padding()
-                        }
-                    }
-                    
-                    // 定时关闭按钮
-                    Button(action: {
-                        showTimerOptions.toggle()
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "timer")
-                            Text(selectedTimer == .off ? "定时" : selectedTimer.displayText)
-                        }
-                        .foregroundColor(.gray)
-                    }
-                    .popover(isPresented: $showTimerOptions) {
-                        TimerOptionsView(selectedOption: $selectedTimer)
-                    }
-                    
-                    // 日间/夜间模式切换按钮
-                    Button(action: {
-                        isDarkMode.toggle()
-                        // 在这里添加切换显示模式的实际逻辑
-                        applyColorScheme(isDarkMode)
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
-                            Text(isDarkMode ? "夜间" : "日间")
-                        }
-                        .foregroundColor(.gray)
-                    }
-                    
-                    // 字体大小按钮
-                    Button(action: {
-                        // 循环切换字体大小
-                        let allSizes = FontSize.allCases
-                        if let currentIndex = allSizes.firstIndex(of: fontSize),
-                           let nextSize = allSizes[safe: (currentIndex + 1) % allSizes.count] {
-                            fontSize = nextSize
-                        }
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "textformat.size")
-                            Text(fontSize.rawValue)
-                        }
-                        .foregroundColor(.gray)
-                    }
-                }
-                .padding(.bottom, 5)
-            }
-            .padding()
-            .background(Color.white)
-        }
-        .onAppear {
-            print("DocumentReaderView appeared - setting isInReaderView to true")
-            NavigationState.shared.isInReaderView = true
-            
-            // 先标记为未加载状态，显示加载指示器
-            isDocumentLoaded = false
-            
-            // 使用DispatchQueue确保视图已完全渲染后再执行这些操作
-            DispatchQueue.main.async {
-                // 设置当前文档
-                playbackManager.currentDocument = document
-                playbackManager.synthesizer = synthesizer
-                
-                // 加载文档
-                print("开始加载文档: \(document.title)")
-                
-                // 显示初步加载和章节分析提示
-                DispatchQueue.main.async {
-                    // 更新UI提示，显示正在处理
-                    self.loadingStatusText = "正在提取文本..."
-                }
-                
-                // 使用更高优先级的队列加载文档
-                synthesizer.loadDocument(document, viewModel: viewModel, onProgress: { progress, message in
-                    // 更新加载进度UI
-                    DispatchQueue.main.async {
-                        self.loadingProgress = progress
-                        self.loadingStatusText = message
-                    }
-                })
-                
-                // 定期检查加载状态，而不是固定延迟
-                var checkCount = 0
-                Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-                    checkCount += 1
-                    
-                    // 检查文本是否已加载或者超时
-                    if !synthesizer.fullText.isEmpty || checkCount > 20 {
-                        timer.invalidate()
-                        
-                        // 强制更新UI
-                        DispatchQueue.main.async {
-                            // 确保文本显示更新
-                            synthesizer.updateCurrentTextDisplay()
-                            // 标记文档已加载
-                            isDocumentLoaded = true
-                            
-                            // 打印调试信息
-                            print("文档加载状态: isDocumentLoaded=\(isDocumentLoaded)")
-                            print("文本内容状态: fullText长度=\(synthesizer.fullText.count)")
-                            print("文本内容状态: currentText长度=\(synthesizer.currentText.count)")
-                            
-                            // 显示文本内容的前20个字符用于调试
-                            if !synthesizer.currentText.isEmpty {
-                                let previewText = String(synthesizer.currentText.prefix(20))
-                                print("文本前20个字符: \"\(previewText)\"")
+                                )
+                                .id("chapter_content_\(chapterIndex)_highlight_\(synth.currentReadingCharacterIndex)")
+                                .onReceive(synth.objectWillChange) { _ in
+                                    // 强制视图刷新
+                                    print("【HighlightedTextView】接收到更新通知")
+                                }
                             }
                         }
-                    }
-                }
-            }
-            
-            // 添加定时器定期更新当前章节索引
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
-                if let synthesizer = playbackManager.synthesizer {
-                    let newIndex = synthesizer.getCurrentChapterIndex()
-                    if currentChapterIndex != newIndex {
-                        currentChapterIndex = newIndex
-                        print("【章节状态】章节已更新: \(newIndex+1)")
+                        .frame(minHeight: 400) // 确保有足够的垂直空间
+                        .background(Color.white.opacity(0.01)) // 添加微小背景以确保整个区域可见
+                    } else {
+                        // 章节内容为空时显示友好提示
+                        VStack(spacing: 10) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 40))
+                                .foregroundColor(.orange)
+                            
+                            Text("章节 \(chapter.title) 内容为空")
+                                .font(.headline)
+                                .foregroundColor(.orange)
+                            
+                            Text("此章节可能是目录或分隔符，您可以跳转到下一章继续阅读。")
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                            
+                            // 添加快速跳转按钮
+                            if chapterIndex < chapters.count - 1 {
+                                Button(action: {
+                                    synth.nextChapter()
+                                }) {
+                                    HStack {
+                                        Text("跳转到下一章")
+                                        Image(systemName: "arrow.right.circle.fill")
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(20)
+                                }
+                                .padding(.top)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(30)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(10)
                     }
                 } else {
-                    // 如果synthesizer已不存在，停止定时器
-                    timer.invalidate()
+                    // 章节索引无效的情况
+                    Text("章节信息错误，无法显示内容")
+                        .foregroundColor(.red)
                 }
-            }
-        }
-        .onDisappear {
-            print("DocumentReaderView disappeared - setting isInReaderView to false")
-            NavigationState.shared.isInReaderView = false
-            
-            // 取消定时关闭功能
-            if selectedTimer != .off {
-                // 取消定时器的代码
-                selectedTimer = .off
-            }
-            
-            // 只有在当前文档不在播放时才停止朗读
-            if !playbackManager.isPlaying {
-                DispatchQueue.main.async {
-                    playbackManager.synthesizer?.stopSpeaking()
-                    playbackManager.synthesizer = nil
-                    playbackManager.currentDocument = nil
-                }
-            }
-        }
-        .onChange(of: playbackManager.synthesizer?.currentReadingCharacterIndex) { _ in
-            if let synth = playbackManager.synthesizer, synth.isPlaying {
-                print("---高亮更新通知---")
-                print("高亮位置: \(synth.currentReadingCharacterIndex)")
-                print("高亮长度: \(synth.currentReadingCharacterCount)")
-                print("是否正在播放: \(synth.isPlaying)")
+            } else {
+                // 没有章节但有文本内容时，显示当前位置附近的一大段文本
+                // 显示更多内容而不仅仅是500字符
+                let currentPosition = synth.currentPosition
+                let startIndex = max(0, Int(currentPosition * Double(synth.fullText.count)) - 1000)
+                let endIndex = min(synth.fullText.count, startIndex + 3000) // 显示3000字符而不是500
                 
-                // 获取高亮的具体文本
-                let chapterContent = synth.getCurrentChapterContent()
-                if !chapterContent.isEmpty && 
-                   synth.currentReadingCharacterIndex < chapterContent.count &&
-                   synth.currentReadingCharacterIndex + synth.currentReadingCharacterCount <= chapterContent.count {
+                let textStartIndex = synth.fullText.index(synth.fullText.startIndex, offsetBy: startIndex)
+                let textEndIndex = synth.fullText.index(synth.fullText.startIndex, offsetBy: endIndex)
+                let displayText = String(synth.fullText[textStartIndex..<textEndIndex])
+                
+                Text(displayText)
+                    .font(.system(size: fontSize.size))
+                    .foregroundColor(.black)
+                    .lineSpacing(5)
+                    .background(Color(.systemYellow).opacity(0.1))
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white)
+        .cornerRadius(10)
+    }
+    
+    private func createProgressSliderView() -> some View {
+        HStack(alignment: .center) {
+            // 后退15秒按钮
+            Button(action: {
+                if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    synth.skipBackward()
+                }
+            }) {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 20))
+                    .foregroundColor(.gray)
+            }
+            .padding(.trailing, 5)
+            
+            // 进度条 - 使用章节内部进度
+            if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer, !synth.getChapters().isEmpty {
+                VStack(spacing: 2) {
+                    // 添加章节指示
+                    let chapterIndex = synth.getCurrentChapterIndex()
+                    if chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
+                        Text("当前章：\(synth.getChapters()[chapterIndex].title)")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
                     
-                    let start = chapterContent.index(chapterContent.startIndex, 
-                                                   offsetBy: synth.currentReadingCharacterIndex)
-                    let end = chapterContent.index(start, 
-                                                 offsetBy: synth.currentReadingCharacterCount)
-                    if start < end {
-                        let highlightedText = chapterContent[start..<end]
-                        print("正在朗读: \"\(highlightedText)\"")
+                    // 章节内进度条 - 增强保护
+                    ProgressSlider(value: Binding(
+                        get: { synth.getCurrentChapterInternalProgress() },
+                        set: { position in
+                            // 锁定当前章节索引
+                            let currentIndex = synth.getCurrentChapterIndex()
+                            
+                            // 如果位置接近1.0，限制最大值
+                            let safePosition = position >= 0.98 ? 0.95 : position
+                            
+                            // 设置进度
+                            if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                                synth.seekTo(position: safePosition)
+                            }
+                            
+                            // 强制确保章节不会改变
+                            DispatchQueue.main.async {
+                                // 再次检查章节是否变化
+                                if currentIndex != synth.getCurrentChapterIndex() {
+                                    print("【UI保护】检测到章节变化，强制恢复到原章节")
+                                    if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                                        synth.jumpToChapter(currentIndex)
+                                    }
+                                    
+                                    // 强制更新UI
+                                    synth.objectWillChange.send()
+                                }
+                            }
+                        }
+                    )).id("progress_\(chapterIndex)")
+                }
+            } else {
+                // 无章节时使用全局进度
+                ProgressSlider(value: Binding(
+                    get: { (playbackManager.currentSynthesizer as? SpeechSynthesizer)?.currentPosition ?? 0 },
+                    set: { position in
+                        if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                            synth.seekTo(position: position)
+                        }
+                    }
+                ))
+            }
+            
+            // 前进15秒按钮
+            Button(action: {
+                if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    synth.skipForward()
+                }
+            }) {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 20))
+                    .foregroundColor(.gray)
+            }
+            .padding(.leading, 5)
+        }
+        .padding(.horizontal)
+    }
+    
+    private func createPlayControlsView() -> some View {
+        HStack {
+            // 水平方向留出适当空间
+            Spacer()
+                .frame(width: 5)
+            
+            // 倍速控制 - 位于左侧边缘和上一首按钮中间
+            Button(action: {
+                showSpeedOptions.toggle()
+            }) {
+                VStack(spacing: 5) {
+                    Image(systemName: "speedometer")
+                        .font(.system(size: 22))
+                    Text("\(String(format: "%.1f", playbackSpeed))x")
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(.gray)
+            }
+            .popover(isPresented: $showSpeedOptions) {
+                SpeedOptionsView(playbackSpeed: $playbackSpeed, synthesizer: playbackManager.currentSynthesizer as? SpeechSynthesizer)
+            }
+            
+            // 弹性空间，但不是完全弹性
+            Spacer()
+                .frame(minWidth: 10, maxWidth: 30)
+            
+            // 上一首按钮 - 修改为上一章
+            Button(action: {
+                if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    synthesizer.previousChapter()
+                    // 记录跳转动作
+                    print("【UI交互】上一章按钮被点击")
+                } else {
+                    playPreviousDocument()
+                }
+            }) {
+                Image(systemName: "backward.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.blue)
+            }
+            .padding(.horizontal, 8)
+            
+            // 播放/暂停按钮
+            Button(action: {
+                if playbackManager.isPlaying {
+                    if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                        synth.pauseSpeaking()
+                    }
+                    playbackManager.isPlaying = false
+                } else {
+                    if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                        if synth.fullText.isEmpty {
+                            print("无法播放：文本为空")
+                        } else {
+                            synth.resumeSpeaking()
+                            if !synth.isPlaying {
+                                synth.startSpeaking(from: synth.currentPosition)
+                            }
+                            playbackManager.isPlaying = true
+                            
+                            if synth.currentText.isEmpty {
+                                synth.updateCurrentTextDisplay()
+                            }
+                        }
                     }
                 }
+            }) {
+                Image(systemName: playbackManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundColor(.blue)
+            }
+            
+            // 下一首按钮 - 修改为下一章
+            Button(action: {
+                withSynthesizer { synthesizer in
+                    synthesizer.nextChapter()
+                    // 记录跳转动作
+                    print("【UI交互】下一章按钮被点击")
+                }
+                // 如果没有合成器，就播放下一个文档
+                if playbackManager.currentSynthesizer == nil {
+                    playNextDocument()
+                }
+            }) {
+                Image(systemName: "forward.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.blue)
+            }
+            .padding(.horizontal, 8)
+            
+            // 弹性空间，但不是完全弹性
+            Spacer()
+                .frame(minWidth: 10, maxWidth: 30)
+            
+            // 播放模式 - 位于右侧边缘和下一首按钮中间
+            Button(action: {
+                let allModes = PlayMode.allCases
+                if let currentIndex = allModes.firstIndex(of: playMode),
+                   let nextMode = allModes[safe: (currentIndex + 1) % allModes.count] {
+                    playMode = nextMode
+                }
+            }) {
+                VStack(spacing: 5) {
+                    Image(systemName: playMode == .sequential ? "repeat" : (playMode == .loop ? "repeat.1" : "1.circle"))
+                        .font(.system(size: 22))
+                    Text(playMode == .sequential ? "顺序" : (playMode == .loop ? "循环" : "单章"))
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(.gray)
+            }
+            
+            // 水平方向留出适当空间
+            Spacer()
+                .frame(width: 5)
+        }
+        .padding(.horizontal, 5)  // 整体水平内边距较小
+        .padding(.vertical, 5)
+    }
+    
+    private func createChapterInfoView() -> some View {
+        HStack {
+            if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer, !synthesizer.getChapters().isEmpty {
+                ChapterIndicator()
+                    .padding(.trailing, 4)
+                
+                Text(currentChapterDisplayText)
+                    .font(.caption)
+                    .foregroundColor(.gray)
             }
         }
+        .id(currentChapterIndex) // 强制在章节索引变化时刷新视图
+        .padding(.top, 5)
+    }
+    
+    private func createExtraControlsView() -> some View {
+        HStack(spacing: 30) {
+            // 章节列表按钮
+            Button(action: {
+                print("【UI交互】章节按钮被点击")
+                
+                // 强制刷新章节列表
+                if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    print("【UI交互】检查章节状态: 共\(synthesizer.getChapters().count)章")
+                    
+                    // 确保章节数据已正确加载
+                    if synthesizer.getChapters().isEmpty && !synthesizer.fullText.isEmpty {
+                        print("【UI交互】章节为空但文本不为空，尝试重新分析")
+                        // 对于大文本，异步处理以避免UI卡顿
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            let result = ChapterSegmenter.splitTextIntoParagraphs(synthesizer.fullText)
+                            
+                            // 过滤掉无效章节
+                            let filteredChapters = result.chapters.filter { chapter in
+                                let contentLength = chapter.endIndex - chapter.startIndex
+                                let isValidContent = contentLength > 100
+                                let isFormatPrefix = chapter.title.hasPrefix("Chapter_") && contentLength < 100
+                                
+                                return isValidContent && !isFormatPrefix
+                            }
+                            
+                            DispatchQueue.main.async {
+                                synthesizer.setChapters(filteredChapters)
+                                synthesizer.setParagraphs(result.paragraphs)
+                                print("【UI交互】重新分析完成，识别到\(filteredChapters.count)个章节")
+                                
+                                // 确保UI刷新后再显示章节列表
+                                synthesizer.objectWillChange.send()
+                                showChapterList = true
+                            }
+                        }
+                    } else {
+                        // 章节数据已存在，直接显示
+                        showChapterList = true
+                    }
+                } else {
+                    print("【UI交互】警告：synthesizer未初始化")
+                    showChapterList = true
+                }
+            }) {
+                VStack {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 22))
+                    Text("章节")
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(.gray)
+            }
+            .popover(isPresented: $showChapterList, arrowEdge: .bottom) {
+                if let synthesizer = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+                    VStack {
+                        Text("章节列表 (\(synthesizer.getChapters().count)章)")
+                            .font(.headline)
+                            .padding()
+                        
+                        ChapterListView(synthesizer: synthesizer, showChapterList: $showChapterList)
+                            .onAppear {
+                                print("【UI交互】章节列表弹窗正在展示，章节数：\(synthesizer.getChapters().count)")
+                            }
+                    }
+                    .frame(minWidth: 300, minHeight: 400)
+                } else {
+                    Text("无法加载章节信息")
+                        .frame(minWidth: 300, minHeight: 100)
+                        .padding()
+                }
+            }
+            
+            // 定时关闭按钮
+            Button(action: {
+                showTimerOptions.toggle()
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "timer")
+                    Text(selectedTimer == .off ? "定时" : selectedTimer.displayText)
+                }
+                .foregroundColor(.gray)
+            }
+            .popover(isPresented: $showTimerOptions) {
+                TimerOptionsView(selectedOption: $selectedTimer)
+            }
+            
+            // 日间/夜间模式切换按钮
+            Button(action: {
+                isDarkMode.toggle()
+                // 在这里添加切换显示模式的实际逻辑
+                applyColorScheme(isDarkMode)
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
+                    Text(isDarkMode ? "夜间" : "日间")
+                }
+                .foregroundColor(.gray)
+            }
+            
+            // 字体大小按钮
+            Button(action: {
+                // 循环切换字体大小
+                let allSizes = FontSize.allCases
+                if let currentIndex = allSizes.firstIndex(of: fontSize),
+                   let nextSize = allSizes[safe: (currentIndex + 1) % allSizes.count] {
+                    fontSize = nextSize
+                }
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "textformat.size")
+                    Text(fontSize.rawValue)
+                }
+                .foregroundColor(.gray)
+            }
+        }
+        .padding(.bottom, 5)
     }
     
     private func playPreviousDocument() {
@@ -805,7 +897,7 @@ struct DocumentReaderView: View {
            currentIndex > 0 {
             // 播放前一个文档
             let previousDocument = viewModel.documents[currentIndex - 1]
-            playbackManager.startPlayback(document: previousDocument, viewModel: viewModel)
+            playbackManager.startPlayback(document: previousDocument, synthesizer: synthesizer)
         }
     }
     
@@ -816,7 +908,7 @@ struct DocumentReaderView: View {
            currentIndex < viewModel.documents.count - 1 {
             // 播放下一个文档
             let nextDocument = viewModel.documents[currentIndex + 1]
-            playbackManager.startPlayback(document: nextDocument, viewModel: viewModel)
+            playbackManager.startPlayback(document: nextDocument, synthesizer: synthesizer)
         }
     }
     
@@ -835,7 +927,7 @@ struct DocumentReaderView: View {
     }
     
     private func getDisplayText() -> String {
-        guard let synth = playbackManager.synthesizer else {
+        guard let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer else {
             return "合成器未初始化"
         }
         
@@ -885,7 +977,7 @@ struct DocumentReaderView: View {
     }
     
     private func handleTextTap(chapter: Chapter, characterIndex: Int) {
-        guard let synth = playbackManager.synthesizer else { return }
+        guard let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer else { return }
         
         // 计算点击位置在章节内的相对位置
         let chapterLength = chapter.endIndex - chapter.startIndex
@@ -911,7 +1003,7 @@ struct DocumentReaderView: View {
     }
     
     private func handleTextTapByRatio(chapter: Chapter, tapRatio: Double) {
-        guard let synth = playbackManager.synthesizer else { return }
+        guard let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer else { return }
         
         // 确保比例在0-1范围内，并增加额外保护避免触及章节边界
         // 将比例约束在0.01到0.90之间，防止意外触发章节跳转
@@ -962,6 +1054,13 @@ struct DocumentReaderView: View {
             }
         }
     }
+    
+    // 添加在 DocumentReaderView 类中的辅助函数
+    private func withSynthesizer(_ action: (SpeechSynthesizer) -> Void) {
+        if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
+            action(synth)
+        }
+    }
 }
 
 // 进度滑块
@@ -998,7 +1097,7 @@ struct ProgressSlider: View {
             updateChapterInfo()
         }
         // 使用条件视图而不是条件发布者
-        .onChange(of: playbackManager.synthesizer?.currentPosition) { _ in
+        .onChange(of: (playbackManager.currentSynthesizer as? SpeechSynthesizer)?.currentPosition) { _ in
             // 当位置变化时检查章节
             updateChapterInfo()
         }
@@ -1011,7 +1110,7 @@ struct ProgressSlider: View {
     
     // 提取更新章节信息的逻辑到一个单独的方法
     private func updateChapterInfo() {
-        if let synth = playbackManager.synthesizer {
+        if let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer {
             let newChapterIndex = synth.getCurrentChapterIndex()
             if currentChapterIndex != newChapterIndex {
                 // 章节变化时强制更新进度值
@@ -1028,7 +1127,6 @@ struct ProgressSlider: View {
                     
                     // 短暂延迟后再获取实际章节内部进度
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // 使用章节内部进度
                         let internalProgress = synth.getCurrentChapterInternalProgress()
                         // 避免进度条跳到最后
                         let safeProgress = min(internalProgress, 0.02) // 确保新章节开始时进度最大只有2%
@@ -1042,14 +1140,14 @@ struct ProgressSlider: View {
     }
     
     private func formatPlayedTime() -> String {
-        guard let synth = playbackManager.synthesizer else {
+        guard let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer else {
             return "00:00"
         }
         
         // 获取当前章节
-            let chapterIndex = synth.getCurrentChapterIndex()
+        let chapterIndex = synth.getCurrentChapterIndex()
         if !synth.getChapters().isEmpty && chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
-                let chapter = synth.getChapters()[chapterIndex]
+            let chapter = synth.getChapters()[chapterIndex]
             
             // 计算章节的估计总时长（假设阅读速度是每分钟500字）
             let chapterTextLength = chapter.endIndex - chapter.startIndex
@@ -1059,33 +1157,33 @@ struct ProgressSlider: View {
             let playedSeconds = value * totalSeconds
             
             let minutes = Int(playedSeconds / 60)
-                let seconds = Int(playedSeconds) % 60
-                
-                return String(format: "%02d:%02d", minutes, seconds)
+            let seconds = Int(playedSeconds) % 60
+            
+            return String(format: "%02d:%02d", minutes, seconds)
         } else {
             // 默认显示
             return "00:00"
-            }
         }
-        
-    private func formatTotalTime() -> String {
-        guard let synth = playbackManager.synthesizer else {
-        return "00:00"
     }
     
+    private func formatTotalTime() -> String {
+        guard let synth = playbackManager.currentSynthesizer as? SpeechSynthesizer else {
+            return "00:00"
+        }
+        
         // 获取当前章节
-            let chapterIndex = synth.getCurrentChapterIndex()
+        let chapterIndex = synth.getCurrentChapterIndex()
         if !synth.getChapters().isEmpty && chapterIndex >= 0 && chapterIndex < synth.getChapters().count {
-                let chapter = synth.getChapters()[chapterIndex]
-                
+            let chapter = synth.getChapters()[chapterIndex]
+            
             // 计算章节的估计总时长（假设阅读速度是每分钟500字）
             let chapterTextLength = chapter.endIndex - chapter.startIndex
             let totalSeconds = Double(chapterTextLength) / 500.0 * 60.0
-                
+            
             let minutes = Int(totalSeconds / 60)
-                let seconds = Int(totalSeconds) % 60
-                
-                return String(format: "%02d:%02d", minutes, seconds)
+            let seconds = Int(totalSeconds) % 60
+            
+            return String(format: "%02d:%02d", minutes, seconds)
         } else {
             // 默认显示
             return "00:00"
@@ -1205,7 +1303,9 @@ struct SpeedOptionsView: View {
                 .accentColor(.red)
                 .onChange(of: playbackSpeed) { newValue in
                     // 设置朗读速度
-                    synthesizer?.setPlaybackRate(Float(newValue))
+                    if let synth = synthesizer {
+                        synth.setPlaybackRate(Float(newValue))
+                    }
                 }
                 .padding(.horizontal)
             
