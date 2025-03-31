@@ -126,6 +126,11 @@ struct ContentView: View {
     @State private var isDragging: Bool = false       // 是否正在拖动进度条
     @State private var timer: Timer? = nil            // 更新进度的计时器
     
+    // 添加这个新的状态变量
+    @State private var showSpeedSelector: Bool = false
+    @State private var selectedRate: Double = 1.0
+    @State private var availableRates: [Double] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    
     /**
      * 初始化函数
      * 在ContentView创建时执行，设置语音合成器和音频会话
@@ -263,10 +268,28 @@ struct ContentView: View {
             
             // 播放控制区 - 播放/暂停按钮
             HStack {
+                // 添加语速调节按钮
+                Button(action: {
+                    showSpeedSelector = true
+                }) {
+                    HStack {
+                        Image(systemName: "speedometer")
+                            .font(.system(size: 22))
+                        Text("\(String(format: "%.1f", selectedRate))x")
+                            .font(.system(size: 16))
+                    }
+                    .padding(8)
+                    .background(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
+                }
+                .padding(.trailing, 12)
+                
+                // 播放/暂停按钮
                 Button(action: {
                     if isPlaying {
                         // 暂停朗读，保存当前位置
                         pauseSpeaking()
+                        isPlaying = false  // 确保设置为false
                     } else {
                         // 如果是暂停后继续，从暂停位置开始
                         if isResuming {
@@ -275,8 +298,8 @@ struct ContentView: View {
                             // 否则从头开始播放
                             startSpeaking()
                         }
+                        isPlaying = true  // 确保设置为true
                     }
-                    isPlaying.toggle()
                 }) {
                     // 根据播放状态显示不同图标
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -324,6 +347,14 @@ struct ContentView: View {
                 stopTimer()
             }
         }
+        // 添加语速选择弹窗
+        .sheet(isPresented: $showSpeedSelector) {
+            SpeedSelectorView(selectedRate: $selectedRate, showSpeedSelector: $showSpeedSelector)
+                .onDisappear {
+                    // 当弹窗关闭时，应用新的语速
+                    applyNewSpeechRate()
+                }
+        }
     }
     
     /**
@@ -353,33 +384,8 @@ struct ContentView: View {
      * 从指定位置开始朗读
      */
     private func startSpeakingFromPosition(_ position: Int) {
-        if position < 0 || position >= sampleText.count {
-            startSpeaking()
-            return
-        }
-        
-        // 更新进度和时间
-        currentProgress = Double(position) / Double(sampleText.count)
-        currentTime = totalTime * currentProgress
-        
-        // 获取从指定位置开始的子字符串
-        let startIndex = sampleText.index(sampleText.startIndex, offsetBy: position)
-        let subText = String(sampleText[startIndex...])
-        
-        // 创建语音合成器使用的话语对象
-        let utterance = AVSpeechUtterance(string: subText)
-        
-        // 设置语音参数
-        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN") 
-        utterance.rate = 0.4
-        utterance.pitchMultiplier = 1.0
-        utterance.volume = 1.0
-        
-        // 关联utterance和位置
-        SpeechDelegate.shared.setPosition(for: utterance, position: position)
-        
-        // 开始朗读
-        synthesizer.speak(utterance)
+        startSpeakingFromPositionWithRate(position, rate: Float(selectedRate))
+        isPlaying = true
     }
     
     /**
@@ -404,6 +410,9 @@ struct ContentView: View {
         
         // 开始朗读
         synthesizer.speak(utterance)
+        
+        // 确保设置播放状态为true
+        isPlaying = true
     }
     
     /**
@@ -584,6 +593,87 @@ struct ContentView: View {
         // 启动计时器
         startTimer()
     }
+    
+    /**
+     * 应用新的语速设置
+     * 如果正在朗读中，会重新从当前位置开始以新的语速朗读
+     */
+    private func applyNewSpeechRate() {
+        // 如果正在朗读，需要停止并重新开始
+        if isPlaying {
+            // 保存当前位置
+            let currentPosition = speechDelegate.highlightRange.location
+            
+            // 停止当前朗读
+            synthesizer.stopSpeaking(at: .immediate)
+            
+            // 从保存的位置以新的语速开始朗读
+            startSpeakingFromPositionWithRate(currentPosition, rate: Float(selectedRate))
+        }
+    }
+    
+    /**
+     * 从指定位置以指定语速开始朗读
+     */
+    private func startSpeakingFromPositionWithRate(_ position: Int, rate: Float) {
+        if position < 0 || position >= sampleText.count {
+            startSpeakingWithRate(rate)
+            return
+        }
+        
+        // 更新进度和时间
+        currentProgress = Double(position) / Double(sampleText.count)
+        currentTime = totalTime * currentProgress
+        
+        // 获取从指定位置开始的子字符串
+        let startIndex = sampleText.index(sampleText.startIndex, offsetBy: position)
+        let subText = String(sampleText[startIndex...])
+        
+        // 创建语音合成器使用的话语对象
+        let utterance = AVSpeechUtterance(string: subText)
+        
+        // 设置语音参数，应用新的语速
+        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+        utterance.rate = rate * 0.4  // 转换为AVSpeechUtterance接受的范围
+        utterance.pitchMultiplier = 1.0
+        utterance.volume = 1.0
+        
+        // 关联utterance和位置
+        SpeechDelegate.shared.setPosition(for: utterance, position: position)
+        
+        // 开始朗读
+        synthesizer.speak(utterance)
+        
+        // 确保设置播放状态为true
+        isPlaying = true
+    }
+    
+    /**
+     * 以指定语速开始朗读整篇文本
+     */
+    private func startSpeakingWithRate(_ rate: Float) {
+        // 重置进度和时间
+        currentProgress = 0.0
+        currentTime = 0.0
+        
+        // 重置起始位置为0
+        SpeechDelegate.shared.startPosition = 0
+        
+        // 创建语音合成器使用的话语对象
+        let utterance = AVSpeechUtterance(string: sampleText)
+        
+        // 设置语音参数，应用新的语速
+        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+        utterance.rate = rate * 0.4  // 转换为AVSpeechUtterance接受的范围
+        utterance.pitchMultiplier = 1.0
+        utterance.volume = 1.0
+        
+        // 开始朗读
+        synthesizer.speak(utterance)
+        
+        // 确保设置播放状态为true
+        isPlaying = true
+    }
 }
 
 /**
@@ -628,6 +718,92 @@ struct HighlightedText: View {
         }
         
         return attributedString
+    }
+}
+
+// 添加这个新的结构体到文件底部，但在#Preview前面
+
+struct SpeedSelectorView: View {
+    @Binding var selectedRate: Double
+    @Binding var showSpeedSelector: Bool
+    
+    // 预设的语速选项
+    let availableRates: [Double] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    
+    // 临时存储用户选择的语速值，确认后再更新到主视图
+    @State private var tempRate: Double
+    
+    // 初始化器，设置初始临时语速
+    init(selectedRate: Binding<Double>, showSpeedSelector: Binding<Bool>) {
+        self._selectedRate = selectedRate
+        self._showSpeedSelector = showSpeedSelector
+        self._tempRate = State(initialValue: selectedRate.wrappedValue)
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            // 标题
+            Text("调语速")
+                .font(.headline)
+                .padding(.top, 20)
+            
+            // 显示当前选择的语速值
+            ZStack {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 60, height: 60)
+                
+                Text("\(String(format: "%.1f", tempRate))x")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .padding(.vertical, 10)
+            
+            // 语速滑块
+            HStack {
+                ForEach(availableRates, id: \.self) { rate in
+                    VStack {
+                        Circle()
+                            .fill(tempRate == rate ? Color.red : Color.gray.opacity(0.3))
+                            .frame(width: 15, height: 15)
+                        
+                        Text("\(String(format: "%.1f", rate))x")
+                            .font(.caption)
+                            .foregroundColor(tempRate == rate ? .red : .gray)
+                    }
+                    .onTapGesture {
+                        tempRate = rate
+                    }
+                    
+                    if rate != availableRates.last {
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            
+            // 滑块控件
+            Slider(value: $tempRate, in: 0.5...4.0, step: 0.1)
+                .accentColor(.red)
+                .padding(.horizontal, 20)
+            
+            // 确认按钮
+            Button("关闭") {
+                // 更新选中的语速值
+                selectedRate = tempRate
+                // 关闭弹窗
+                showSpeedSelector = false
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 40)
+            .background(Color.gray.opacity(0.2))
+            .cornerRadius(8)
+            .padding(.bottom, 20)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .cornerRadius(16)
+        .padding()
     }
 }
 
