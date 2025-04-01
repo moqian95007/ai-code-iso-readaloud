@@ -87,7 +87,6 @@ struct UserDefaultsKeys {
     static let lastProgress = "lastProgress"
     static let lastPlaybackTime = "lastPlaybackTime"
     static let wasPlaying = "wasPlaying"
-    static let autoResumePlayback = "autoResumePlayback"
 }
 
 /**
@@ -187,15 +186,7 @@ struct ContentView: View {
     }
     
     // 在 ContentView 中添加一个状态变量，并设置默认值为 false
-    @State private var autoResumePlayback: Bool = {
-        // 检查键是否存在
-        if UserDefaults.standard.object(forKey: UserDefaultsKeys.autoResumePlayback) != nil {
-            return UserDefaults.standard.bool(forKey: UserDefaultsKeys.autoResumePlayback)
-        } else {
-            // 如果键不存在，返回默认值 false (不自动恢复)
-            return false
-        }
-    }()
+    @State private var isAppLaunch: Bool = true
     
     /**
      * 初始化函数
@@ -221,15 +212,6 @@ struct ContentView: View {
         _isDarkMode = State(initialValue: savedIsDarkMode)
         _selectedRate = State(initialValue: savedRate)
         _fontSizeOption = State(initialValue: savedFontSizeOption)
-        
-        // 读取自动恢复播放设置，如果不存在则设置默认值为 true
-        let savedAutoResumePlayback = UserDefaults.standard.bool(forKey: UserDefaultsKeys.autoResumePlayback)
-        _autoResumePlayback = State(initialValue: savedAutoResumePlayback)
-        
-        // 如果 autoResumePlayback 键不存在，设置默认值为 true
-        if UserDefaults.standard.object(forKey: UserDefaultsKeys.autoResumePlayback) == nil {
-            UserDefaults.standard.set(true, forKey: UserDefaultsKeys.autoResumePlayback)
-        }
         
         // 配置音频会话 - 非常重要，否则可能没有声音输出
         do {
@@ -300,6 +282,48 @@ struct ContentView: View {
             
             // 添加进度条和时间显示
             VStack(spacing: 5) {
+                // 如果有上次播放位置，显示恢复提示或按钮 - 只在应用启动时显示
+                if isResuming && !isPlaying && isAppLaunch {
+                    HStack {
+                        Button(action: {
+                            startSpeakingFromPosition(currentPlaybackPosition)
+                            isPlaying = true
+                            isAppLaunch = false  // 用户做出选择后，标记为非启动状态
+                        }) {
+                            Label("继续上次播放", systemImage: "play.circle")
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                        
+                        Spacer()
+                        
+                        // 从头开始按钮
+                        Button(action: {
+                            // 重置恢复状态
+                            isResuming = false
+                            currentPlaybackPosition = 0
+                            currentProgress = 0
+                            currentTime = 0
+                            // 清除保存的播放进度
+                            UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition)
+                            UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress)
+                            UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime)
+                            isAppLaunch = false  // 用户做出选择后，标记为非启动状态
+                        }) {
+                            Text("从头开始")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .padding(.vertical, 5)
+                }
+                
                 // 左侧显示当前时间，右侧显示总时间
                 HStack {
                     Text(formatTime(currentTime))
@@ -393,6 +417,7 @@ struct ContentView: View {
                             startSpeaking()
                         }
                         isPlaying = true
+                        isAppLaunch = false  // 一旦用户主动点击播放，就不再是启动状态
                     }
                 }) {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -467,49 +492,6 @@ struct ContentView: View {
                 }
             }
             .padding(.bottom, 30)
-            
-            // 在播放按钮下方添加一个新的 HStack 包含自动继续播放开关
-            Toggle("自动继续上次播放", isOn: $autoResumePlayback)
-                .onChange(of: autoResumePlayback) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: UserDefaultsKeys.autoResumePlayback)
-                }
-            
-            // 如果有上次播放位置，显示恢复提示或按钮
-            if isResuming && !isPlaying {
-                HStack {
-                    Button(action: {
-                        startSpeakingFromPosition(currentPlaybackPosition)
-                        isPlaying = true
-                    }) {
-                        Label("继续上次播放", systemImage: "play.circle")
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 10)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
-                    
-                    Spacer()
-                    
-                    // 可选：添加一个忽略按钮
-                    Button(action: {
-                        // 重置恢复状态
-                        isResuming = false
-                        currentPlaybackPosition = 0
-                        currentProgress = 0
-                        currentTime = 0
-                        // 清除保存的播放进度
-                        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition)
-                        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress)
-                        UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime)
-                    }) {
-                        Text("从头开始")
-                            .foregroundColor(.gray)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 10)
-            }
         }
         .onAppear {
             // 计算总时长估计值 (按照每分钟300个汉字的朗读速度估算)
@@ -527,6 +509,9 @@ struct ContentView: View {
                 currentProgress = Double(currentPlaybackPosition) / Double(sampleText.count)
                 currentTime = totalTime * currentProgress
             }
+            
+            // 重置为应用启动状态
+            isAppLaunch = true
         }
         .onChange(of: isPlaying) { playing in
             if playing {
