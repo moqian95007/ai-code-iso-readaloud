@@ -1,0 +1,128 @@
+import SwiftUI
+
+/// 浮动球视图
+struct FloatingBallView: View {
+    @Binding var isVisible: Bool
+    @Binding var position: CGPoint
+    
+    // 记录拖动状态
+    @State private var dragOffset = CGSize.zero
+    @State private var isDragging = false
+    
+    // 添加最近播放的文章状态，用于点击跳转
+    @ObservedObject private var articleManager = ArticleManager()
+    
+    var body: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.8))
+            .frame(width: 50, height: 50)
+            .overlay(
+                Image(systemName: "music.note")
+                    .foregroundColor(.white)
+                    .font(.system(size: 24))
+            )
+            .shadow(color: Color.black.opacity(0.3), radius: 3, x: 1, y: 1)
+            .position(position)
+            .gesture(
+                DragGesture()
+                    .onChanged { gesture in
+                        self.isDragging = true
+                        self.position = CGPoint(
+                            x: gesture.location.x,
+                            y: gesture.location.y
+                        )
+                    }
+                    .onEnded { _ in
+                        self.isDragging = false
+                    }
+            )
+            .onTapGesture {
+                handleBallTap()
+            }
+            .opacity(isVisible ? 1 : 0)
+            .animation(.easeInOut, value: isVisible)
+            .onAppear {
+                // 加载文章列表
+                loadArticles()
+            }
+    }
+    
+    // 处理浮动球点击事件
+    private func handleBallTap() {
+        // 查找最近真正播放过的文章（不只是打开过）
+        if let playedArticle = findLastPlayedArticle() {
+            // 发送通知，让HomeView处理导航
+            NotificationCenter.default.post(
+                name: Notification.Name("OpenArticle"),
+                object: nil,
+                userInfo: ["articleId": playedArticle.id]
+            )
+        } else if let firstArticle = articleManager.articles.first {
+            // 如果没有播放记录，使用第一篇文章
+            NotificationCenter.default.post(
+                name: Notification.Name("OpenArticle"),
+                object: nil,
+                userInfo: ["articleId": firstArticle.id]
+            )
+        }
+    }
+    
+    // 找到最近真正播放过的文章
+    private func findLastPlayedArticle() -> Article? {
+        // 遍历所有文章，检查它们是否有播放记录
+        var mostRecentArticle: Article? = nil
+        var mostRecentTime: Date? = nil
+        
+        for article in articleManager.articles {
+            // 检查该文章是否有播放记录
+            let wasPlayingKey = UserDefaultsKeys.wasPlaying(for: article.id)
+            let lastTimeKey = UserDefaultsKeys.lastPlaybackTime(for: article.id)
+            
+            // 只有文章曾经播放过，才考虑它
+            if UserDefaults.standard.bool(forKey: wasPlayingKey) || 
+               UserDefaults.standard.double(forKey: lastTimeKey) > 0 {
+                
+                // 获取最后播放时间
+                if let lastPlayTime = getLastPlayTime(for: article.id) {
+                    // 如果这是第一个找到的文章，或者这个文章的播放时间比当前记录的更近
+                    if mostRecentTime == nil || lastPlayTime > mostRecentTime! {
+                        mostRecentArticle = article
+                        mostRecentTime = lastPlayTime
+                    }
+                }
+            }
+        }
+        
+        return mostRecentArticle
+    }
+    
+    // 获取文章最后播放的时间
+    private func getLastPlayTime(for articleId: UUID) -> Date? {
+        // 检查是否存储了最后播放时间戳
+        let key = UserDefaultsKeys.lastPlayTime(for: articleId)
+        if let timeInterval = UserDefaults.standard.object(forKey: key) as? TimeInterval {
+            return Date(timeIntervalSince1970: timeInterval)
+        }
+        return nil
+    }
+    
+    // 加载文章列表
+    private func loadArticles() {
+        // 确保文章已加载
+        articleManager.loadArticles()
+    }
+}
+
+// 预览
+struct FloatingBallView_Previews: PreviewProvider {
+    static var previews: some View {
+        Color.gray.opacity(0.3)
+            .edgesIgnoringSafeArea(.all)
+            .overlay(
+                FloatingBallView(
+                    isVisible: .constant(true),
+                    position: .constant(CGPoint(x: 200, y: 300))
+                )
+            )
+    }
+} 
