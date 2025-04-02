@@ -1,18 +1,38 @@
 import SwiftUI
 import AVFoundation
+import Combine
 
 /// 文章阅读和朗读的主视图
 struct ArticleReaderView: View {
     // 文章数据
-    let article: Article
+    @State private var article: Article
+    @State private var currentListArticles: [Article] = []
+    
+    // 选中的列表ID (可选)
+    var selectedListId: UUID? = nil
+    
+    // 用于防止重复处理PlayNextArticle通知
+    private static var lastPlayNextTime: Date = Date(timeIntervalSince1970: 0)
+    
+    // 用于防止重复调用playNextArticle
+    private static var lastArticlePlayTime: Date = Date(timeIntervalSince1970: 0)
+    
+    // 初始化方法
+    init(article: Article, selectedListId: UUID? = nil) {
+        self._article = State(initialValue: article)
+        self.selectedListId = selectedListId
+    }
     
     // 状态管理
     @StateObject private var speechManager = SpeechManager.shared
     @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var articleManager = ArticleManager()
+    @StateObject private var listManager = ArticleListManager()
     
     // 弹窗状态
     @State private var showSpeedSelector: Bool = false
     @State private var showVoiceSelector: Bool = false
+    @State private var showArticleList: Bool = false
     @State private var availableVoices: [AVSpeechSynthesisVoice] = []
     
     // 应用启动状态标志
@@ -24,8 +44,56 @@ struct ArticleReaderView: View {
     // 错误提示状态
     @State private var showVoiceLanguageError: Bool = false
     
+    // 用于取消通知订阅
+    @State private var playNextSubscription: AnyCancellable?
+    
+    // 获取当前列表中的所有文章
+    private var listArticles: [Article] {
+        // 如果有指定的列表ID，优先使用该列表
+        if let listId = selectedListId {
+            // 如果是默认的"所有文章"列表
+            if listManager.lists.first?.id == listId {
+                return articleManager.articles
+            }
+            
+            // 否则获取该列表中的所有文章
+            if let list = listManager.lists.first(where: { $0.id == listId }) {
+                // 根据ID获取文章对象
+                return list.articleIds.compactMap { id in
+                    articleManager.findArticle(by: id)
+                }
+            }
+        }
+        
+        // 如果没有指定列表或找不到指定列表，使用原来的逻辑
+        // 如果当前文章没有所属列表，就只显示当前文章
+        let containingLists = listManager.listsContainingArticle(articleId: article.id)
+        
+        // 如果文章不属于任何列表或者只属于默认的"所有文章"列表，就只显示当前文章
+        if containingLists.isEmpty || (containingLists.count == 1 && containingLists[0].id == listManager.lists.first?.id) {
+            return [article]
+        }
+        
+        // 获取文章所属的非默认列表中的第一个
+        let firstNonDefaultList = containingLists.first { $0.id != listManager.lists.first?.id }
+        
+        // 获取该列表中的所有文章
+        if let listId = firstNonDefaultList?.id {
+            // 找到列表中所有文章的ID
+            if let list = listManager.lists.first(where: { $0.id == listId }) {
+                // 根据ID获取文章对象
+                return list.articleIds.compactMap { id in
+                    articleManager.findArticle(by: id)
+                }
+            }
+        }
+        
+        // 默认情况下只显示当前文章
+        return [article]
+    }
+    
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             // 标题
             Text(article.title)
                 .font(.title)
@@ -159,21 +227,34 @@ struct ArticleReaderView: View {
             
             // 播放控制区
             HStack {
+                Spacer()
+                
                 // 语速调节按钮
                 Button(action: {
                     showSpeedSelector = true
                 }) {
-                    HStack {
+                    VStack {
                         Image(systemName: "speedometer")
                             .font(.system(size: 22))
                         Text("\(String(format: "%.1f", speechManager.selectedRate))x")
                             .font(.system(size: 16))
                     }
+                    .frame(width: 70)  // 设置固定宽度
                     .padding(8)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
                 }
-                .padding(.trailing, 12)
+                
+                Spacer()
+                
+                // 上一篇按钮
+                Button(action: {
+                    playPreviousArticle()
+                }) {
+                    Image(systemName: "backward.end.fill")
+                        .resizable()
+                        .frame(width: 30, height: 30)
+                        .foregroundColor(themeManager.isDarkMode ? .white : .blue)
+                }
+                .padding(.trailing, 20)
                 
                 // 播放/暂停按钮
                 Button(action: {
@@ -205,15 +286,58 @@ struct ArticleReaderView: View {
                         .foregroundColor(themeManager.isDarkMode ? .white : .blue)
                 }
                 
-                // 按钮文字说明
-                Text(speechManager.isPlaying ? "暂停" : (speechManager.isResuming ? "继续" : "播放"))
-                    .font(.headline)
-                    .padding(.leading, 5)
+                // 下一篇按钮
+                Button(action: {
+                    playNextArticle()
+                }) {
+                    Image(systemName: "forward.end.fill")
+                        .resizable()
+                        .frame(width: 30, height: 30)
+                        .foregroundColor(themeManager.isDarkMode ? .white : .blue)
+                }
+                .padding(.leading, 20)
+                
+                Spacer()
+                
+                // 播放模式切换按钮
+                Button(action: {
+                    speechManager.togglePlaybackMode()
+                }) {
+                    VStack {
+                        Image(systemName: speechManager.playbackMode.iconName)
+                            .font(.system(size: 22))
+                        Text(speechManager.playbackMode.rawValue)
+                            .font(.system(size: 16))
+                    }
+                    .frame(width: 70)  // 设置固定宽度
+                    .padding(8)
+                }
+                
+                Spacer()
             }
             .padding(.bottom, 15)
             
             // 设置按钮区域
             HStack(spacing: 20) {
+                // 列表按钮
+                Button(action: {
+                    // 确保已加载文章
+                    articleManager.loadArticles()
+                    showArticleList = true
+                }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 18))
+                        
+                        Text("列表")
+                            .font(.system(size: 16))
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
+                }
+                
                 // 日间/夜间模式切换按钮
                 Button(action: {
                     themeManager.toggleDarkMode()
@@ -299,14 +423,95 @@ struct ArticleReaderView: View {
             .padding(.bottom, 30)
         }
         .onAppear {
+            print("========= ArticleReaderView.onAppear =========")
             // 初始化语音管理器
             speechManager.setup(for: article)
+            
+            // 加载文章列表
+            articleManager.loadArticles()
             
             // 通知已进入播放界面
             NotificationCenter.default.post(name: Notification.Name("EnterPlaybackView"), object: nil)
             
             // 保存最近播放的文章ID
             UserDefaults.standard.set(article.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
+            
+            // 设置当前列表文章
+            currentListArticles = listArticles
+            print("设置当前播放列表: \(currentListArticles.count)篇文章")
+            
+            // 更新speechManager中的播放列表
+            speechManager.updatePlaylist(currentListArticles)
+            print("更新SpeechManager播放列表完成")
+            
+            // 监听播放下一篇文章的通知
+            playNextSubscription = NotificationCenter.default.publisher(for: Notification.Name("PlayNextArticle"))
+                .receive(on: RunLoop.main)
+                .sink { _ in
+                    print("收到PlayNextArticle通知，准备播放下一篇")
+                    
+                    // 防止重复快速处理
+                    let now = Date()
+                    if now.timeIntervalSince(ArticleReaderView.lastPlayNextTime) < 2.0 {
+                        print("两次PlayNextArticle触发间隔太短，忽略此次请求")
+                        return
+                    }
+                    ArticleReaderView.lastPlayNextTime = now
+                    
+                    // 特殊处理：列表中只有一篇文章的情况
+                    if self.listArticles.count == 1 && self.speechManager.playbackMode == .listRepeat {
+                        print("列表中只有一篇文章，直接从头开始播放当前文章")
+                        
+                        // 停止当前所有播放
+                        self.speechManager.stopSpeaking(resetResumeState: true)
+                        
+                        // 延迟加长到2秒，确保之前的播放状态完全重置
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            // 确保语音代理状态已完全重置
+                            self.speechDelegate.startPosition = 0
+                            self.speechDelegate.wasManuallyPaused = false
+                            // 使用公共方法重置播放标志
+                            self.speechManager.resetPlaybackFlags()
+                            
+                            // 从头开始播放
+                            self.speechManager.startSpeaking()
+                            print("重新开始播放唯一文章")
+                        }
+                    } else {
+                        // 有多篇文章，正常处理下一篇
+                        self.playNextArticle()
+                    }
+                }
+            
+            // 检查是否是从列表循环模式导航而来
+            let isFromListRepeat = UserDefaults.standard.bool(forKey: UserDefaultsKeys.isFromListRepeat)
+            print("是否从列表循环跳转而来: \(isFromListRepeat)")
+            
+            if isFromListRepeat && speechManager.playbackMode == .listRepeat {
+                print("检测到是从列表循环跳转而来，准备自动开始播放")
+                // 重置标记
+                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.isFromListRepeat)
+                
+                // 增加延迟时间到1.2秒，确保视图已完全加载且前一个播放已完全停止
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    // 确保重置所有状态标志
+                    self.speechDelegate.startPosition = 0
+                    self.speechDelegate.wasManuallyPaused = false
+                    // 使用公共方法重置播放标志
+                    self.speechManager.resetPlaybackFlags()
+                    
+                    print("开始自动播放")
+                    // 确保从头开始播放
+                    self.speechManager.startSpeaking()
+                }
+            }
+            
+            // 打印列表循环状态
+            if currentListArticles.count == 1 {
+                print("⚠️ 注意：列表中只有一篇文章，列表循环将重新播放同一篇文章")
+            }
+            
+            print("==============================================")
         }
         .onDisappear {
             // 通知已离开播放界面
@@ -314,6 +519,9 @@ struct ArticleReaderView: View {
             
             // 清理资源
             speechManager.cleanup()
+            
+            // 取消通知订阅
+            playNextSubscription?.cancel()
         }
         .sheet(isPresented: $showSpeedSelector) {
             SpeedSelectorView(selectedRate: $speechManager.selectedRate, showSpeedSelector: $showSpeedSelector)
@@ -331,6 +539,27 @@ struct ArticleReaderView: View {
             .onDisappear {
                 speechManager.applyNewVoice()
             }
+        }
+        .sheet(isPresented: $showArticleList) {
+            ArticleListPopoverView(
+                articles: listArticles,
+                currentArticleId: article.id,
+                onSelectArticle: { selectedArticle in
+                    // 打开选中的文章
+                    if selectedArticle.id != article.id {
+                        // 发送通知打开新文章，同时传递当前的列表ID
+                        NotificationCenter.default.post(
+                            name: Notification.Name("OpenArticle"),
+                            object: nil,
+                            userInfo: [
+                                "articleId": selectedArticle.id,
+                                "selectedListId": selectedListId as Any
+                            ]
+                        )
+                    }
+                },
+                isPresented: $showArticleList
+            )
         }
         .background(themeManager.backgroundColor())
         .foregroundColor(themeManager.foregroundColor())
@@ -357,18 +586,53 @@ struct ArticleReaderView: View {
     
     // 处理文本点击事件
     private func handleTextTap(paragraphIndex: Int, paragraph: String) {
-        var startPosition = 0
+        print("========= 用户点击了文本段落 =========")
+        print("点击的段落索引: \(paragraphIndex)")
+        print("文本段落长度: \(paragraph.count)")
+        
+        // 安全检查：确保文章内容有效
         let paragraphs = article.content.components(separatedBy: "\n\n")
+        
+        // 确保索引在有效范围内
+        if paragraphIndex < 0 || paragraphIndex >= paragraphs.count {
+            print("段落索引超出范围")
+            return
+        }
+        
+        var startPosition = 0
         
         for i in 0..<paragraphIndex {
             startPosition += paragraphs[i].count + 2  // +2 for "\n\n"
         }
         
-        if speechManager.isPlaying {
-            speechManager.stopSpeaking()
+        // 确保计算的位置有效
+        if startPosition < 0 || startPosition >= article.content.count {
+            print("计算的起始位置无效: \(startPosition)，超出范围[0, \(article.content.count)]")
+            startPosition = 0
         }
         
-        speechManager.startSpeakingFromPosition(startPosition)
+        print("计算的起始位置: \(startPosition)")
+        
+        // 确保完全停止当前播放，重置所有状态
+        if speechManager.isPlaying {
+            // 设置标志防止触发循环播放
+            speechDelegate.wasManuallyPaused = true
+            // 停止当前播放但不重置恢复状态
+            speechManager.stopSpeaking(resetResumeState: false)
+        }
+        
+        // 清除可能存在的旧位置信息
+        speechDelegate.startPosition = startPosition
+        
+        // 延迟一点开始播放，确保之前的停止操作已完成
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            print("开始从位置 \(startPosition) 播放")
+            // 确保设置正确的标志，防止从中间位置播放结束后自动循环
+            self.speechDelegate.wasManuallyPaused = true
+            self.speechManager.startSpeakingFromPosition(startPosition)
+        }
+        
+        print("=======================================")
     }
     
     // 滚动到当前高亮段落
@@ -403,11 +667,271 @@ struct ArticleReaderView: View {
     
     // 检查语音语言是否与文章语言兼容
     private func isLanguageCompatible(voiceLanguage: String, articleLanguage: String) -> Bool {
+        // 特殊情况处理
+        if voiceLanguage.isEmpty || articleLanguage.isEmpty {
+            print("语言代码为空，默认兼容")
+            return true // 如果语言代码为空，默认为兼容
+        }
+        
         // 提取语言代码（如 "zh-CN" 中的 "zh"）
         let voiceMainLanguage = voiceLanguage.split(separator: "-").first?.lowercased() ?? voiceLanguage.lowercased()
         let articleMainLanguage = articleLanguage.split(separator: "-").first?.lowercased() ?? articleLanguage.lowercased()
         
+        // 增加日志
+        print("比较语音语言: \(voiceMainLanguage) 与文章语言: \(articleMainLanguage)")
+        
+        // 特殊处理：部分中文变体兼容性
+        if (voiceMainLanguage == "zh" || voiceMainLanguage == "yue" || voiceMainLanguage == "cmn") &&
+           (articleMainLanguage == "zh" || articleMainLanguage == "yue" || articleMainLanguage == "cmn") {
+            print("中文变体语言，视为兼容")
+            return true
+        }
+        
+        // 特殊处理：语音朗读器
+        if voiceMainLanguage == "auto" {
+            print("语音为自动检测，视为兼容")
+            return true // 自动语言检测，总是视为兼容
+        }
+        
         // 如果主要语言代码相同，则认为兼容
-        return voiceMainLanguage == articleMainLanguage
+        let isCompatible = voiceMainLanguage == articleMainLanguage
+        
+        if isCompatible {
+            print("语言兼容：\(voiceMainLanguage) 与 \(articleMainLanguage)")
+        } else {
+            print("语言不兼容：\(voiceMainLanguage) 与 \(articleMainLanguage)")
+        }
+        
+        return isCompatible
+    }
+    
+    // 播放下一篇文章
+    private func playNextArticle() {
+        print("========= ArticleReaderView.playNextArticle =========")
+        print("当前文章: \(article.title)")
+        print("列表文章数量: \(listArticles.count)")
+        
+        // 防止重复快速处理
+        let now = Date()
+        if now.timeIntervalSince(ArticleReaderView.lastArticlePlayTime) < 1.5 {
+            print("⚠️ 播放操作间隔太短，忽略此次请求")
+            return
+        }
+        ArticleReaderView.lastArticlePlayTime = now
+        
+        // 首先确保停止当前所有播放
+        if speechManager.isPlaying {
+            speechManager.stopSpeaking(resetResumeState: true)
+        }
+        
+        // 重置关键状态标志
+        speechDelegate.startPosition = 0
+        speechDelegate.wasManuallyPaused = false
+        
+        // 设置标记，表示这是从列表循环模式跳转的
+        UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isFromListRepeat)
+        print("设置列表循环跳转标记")
+        
+        // 特殊处理：列表中只有一篇文章的情况
+        if listArticles.count == 1 && listArticles[0].id == article.id {
+            print("列表中只有一篇文章，直接从头开始播放当前文章")
+            
+            // 重置播放状态
+            speechManager.setup(for: article)
+            
+            // 延迟更久以确保所有状态已重置
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                // 再次确保代理状态已重置
+                self.speechDelegate.startPosition = 0
+                self.speechDelegate.wasManuallyPaused = false
+                // 使用公共方法重置播放标志
+                self.speechManager.resetPlaybackFlags()
+                
+                // 从头开始播放
+                self.speechManager.startSpeaking()
+                print("开始循环播放唯一文章")
+            }
+            return
+        }
+        
+        // 获取当前文章在列表中的索引
+        if let currentIndex = listArticles.firstIndex(where: { $0.id == article.id }) {
+            print("当前文章索引: \(currentIndex)")
+            
+            // 计算下一篇文章的索引
+            let nextIndex = (currentIndex + 1) % listArticles.count
+            print("下一篇文章索引: \(nextIndex)")
+            
+            // 在列表循环模式下，直接播放下一篇文章，即使循环到自己
+            let nextArticle = listArticles[nextIndex]
+            print("下一篇文章: \(nextArticle.title)")
+            
+            // 添加额外延迟再发送通知
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // 发送通知打开新文章
+                NotificationCenter.default.post(
+                    name: Notification.Name("OpenArticle"),
+                    object: nil,
+                    userInfo: [
+                        "articleId": nextArticle.id,
+                        "selectedListId": self.selectedListId as Any
+                    ]
+                )
+                print("已发送OpenArticle通知")
+            }
+        } else {
+            print("当前文章不在列表中，尝试使用第一篇文章")
+            
+            // 如果当前文章不在列表中，尝试播放列表的第一篇文章
+            if let firstArticle = listArticles.first {
+                print("播放列表的第一篇文章: \(firstArticle.title)")
+                
+                // 添加延迟以确保状态已重置
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("OpenArticle"),
+                        object: nil,
+                        userInfo: [
+                            "articleId": firstArticle.id,
+                            "selectedListId": self.selectedListId as Any
+                        ]
+                    )
+                    print("已发送OpenArticle通知")
+                }
+            } else {
+                print("列表中没有文章可播放")
+            }
+        }
+        
+        print("=================================================")
+    }
+    
+    // 播放上一篇文章
+    private func playPreviousArticle() {
+        print("========= ArticleReaderView.playPreviousArticle =========")
+        print("当前文章: \(article.title)")
+        print("列表文章数量: \(listArticles.count)")
+        
+        // 防止重复快速处理
+        let now = Date()
+        if now.timeIntervalSince(ArticleReaderView.lastArticlePlayTime) < 1.5 {
+            print("⚠️ 播放操作间隔太短，忽略此次请求")
+            return
+        }
+        ArticleReaderView.lastArticlePlayTime = now
+        
+        // 首先确保停止当前所有播放
+        if speechManager.isPlaying {
+            speechManager.stopSpeaking(resetResumeState: true)
+        }
+        
+        // 重置关键状态标志
+        speechDelegate.startPosition = 0
+        speechDelegate.wasManuallyPaused = false
+        
+        // 设置标记，表示这是从列表循环模式跳转的
+        UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isFromListRepeat)
+        print("设置列表循环跳转标记")
+        
+        // 特殊处理：列表中只有一篇文章的情况
+        if listArticles.count == 1 && listArticles[0].id == article.id {
+            print("列表中只有一篇文章，直接从头开始播放当前文章")
+            
+            // 重置播放状态
+            speechManager.setup(for: article)
+            
+            // 延迟以确保所有状态已重置
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                // 再次确保代理状态已重置
+                self.speechDelegate.startPosition = 0
+                self.speechDelegate.wasManuallyPaused = false
+                // 使用公共方法重置播放标志
+                self.speechManager.resetPlaybackFlags()
+                
+                // 从头开始播放
+                self.speechManager.startSpeaking()
+                print("开始循环播放唯一文章")
+            }
+            return
+        }
+        
+        // 获取当前文章在列表中的索引
+        if let currentIndex = listArticles.firstIndex(where: { $0.id == article.id }) {
+            print("当前文章索引: \(currentIndex)")
+            
+            // 计算上一篇文章的索引
+            let previousIndex = (currentIndex - 1 + listArticles.count) % listArticles.count
+            print("上一篇文章索引: \(previousIndex)")
+            
+            // 获取上一篇文章
+            let previousArticle = listArticles[previousIndex]
+            print("上一篇文章: \(previousArticle.title)")
+            
+            // 添加额外延迟再发送通知
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // 发送通知打开新文章
+                NotificationCenter.default.post(
+                    name: Notification.Name("OpenArticle"),
+                    object: nil,
+                    userInfo: [
+                        "articleId": previousArticle.id,
+                        "selectedListId": self.selectedListId as Any
+                    ]
+                )
+                print("已发送OpenArticle通知")
+            }
+        } else {
+            print("当前文章不在列表中，尝试使用最后一篇文章")
+            
+            // 如果当前文章不在列表中，尝试播放列表的最后一篇文章
+            if let lastArticle = listArticles.last {
+                print("播放列表的最后一篇文章: \(lastArticle.title)")
+                
+                // 添加延迟以确保状态已重置
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("OpenArticle"),
+                        object: nil,
+                        userInfo: [
+                            "articleId": lastArticle.id,
+                            "selectedListId": self.selectedListId as Any
+                        ]
+                    )
+                    print("已发送OpenArticle通知")
+                }
+            } else {
+                print("列表中没有文章可播放")
+            }
+        }
+        
+        print("=================================================")
+    }
+    
+    private func handlePlayNextArticle() {
+        // 获取当前文章的索引
+        if let currentIndex = currentListArticles.firstIndex(where: { $0.id == article.id }) {
+            // 计算下一篇文章的索引（循环处理）
+            let nextIndex = (currentIndex + 1) % currentListArticles.count
+            
+            // 获取下一篇要播放的文章
+            let nextArticle = currentListArticles[nextIndex]
+            article = nextArticle
+            speechManager.setup(for: nextArticle)
+            speechManager.startSpeaking()
+        } else if !currentListArticles.isEmpty {
+            // 如果当前文章不在列表中，播放列表的第一篇
+            let firstArticle = currentListArticles[0]
+            article = firstArticle
+            speechManager.setup(for: firstArticle)
+            speechManager.startSpeaking()
+        }
+    }
+    
+    private func handleFloatingButtonTap() {
+        // 使用上一次播放的文章列表
+        if !speechManager.lastPlayedArticles.isEmpty {
+            currentListArticles = speechManager.lastPlayedArticles
+        }
+        showArticleList = true
     }
 } 

@@ -38,6 +38,16 @@ class ArticleManager: ObservableObject {
         saveArticles()
     }
     
+    // 添加新文章并返回创建的文章对象
+    func addArticleAndReturn(title: String, content: String) -> Article? {
+        // 如果标题为空，使用"新文章"作为默认标题
+        let articleTitle = title.isEmpty ? "新文章" : title
+        let newArticle = Article(title: articleTitle, content: content, createdAt: Date())
+        articles.append(newArticle)
+        saveArticles()
+        return newArticle
+    }
+    
     // 删除文章
     func deleteArticle(at indexSet: IndexSet) {
         articles.remove(atOffsets: indexSet)

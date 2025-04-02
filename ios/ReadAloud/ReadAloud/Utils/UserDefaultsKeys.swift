@@ -11,6 +11,12 @@ struct UserDefaultsKeys {
     static let selectedVoiceName = "selectedVoiceName"
     static let lastPlayedArticleId = "lastPlayedArticleId"
     
+    // 播放模式
+    static let playbackMode = "playbackMode"
+    
+    // 列表循环跳转标记
+    static let isFromListRepeat = "isFromListRepeat"
+    
     // 为每篇文章创建唯一的键
     static func lastPlaybackPosition(for articleId: UUID) -> String {
         return "lastPlaybackPosition_\(articleId.uuidString)"
@@ -31,4 +37,6 @@ struct UserDefaultsKeys {
     static func lastPlayTime(for articleId: UUID) -> String {
         return "lastPlayTime_\(articleId.uuidString)"
     }
+    
+    static let lastPlayedArticles = "lastPlayedArticles"
 } 
