@@ -43,13 +43,23 @@ struct ReadAloudApp: App {
                     HomeView()
                         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("EnterPlaybackView"))) { _ in
                             // 进入播放页面时隐藏浮动球
-                            floatingBallManager.hide()
-                            isInPlaybackView = true
+                            print("App层级收到EnterPlaybackView通知，隐藏浮动球")
+                            
+                            // 在主线程延迟隐藏浮动球，避免可能的导航冲突
+                            DispatchQueue.main.async {
+                                floatingBallManager.hide()
+                                isInPlaybackView = true
+                            }
                         }
                         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ExitPlaybackView"))) { _ in
                             // 离开播放页面时显示浮动球
-                            floatingBallManager.show()
-                            isInPlaybackView = false
+                            print("App层级收到ExitPlaybackView通知，显示浮动球")
+                            
+                            // 延迟显示浮动球，避免在导航动画过程中显示
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                floatingBallManager.show()
+                                isInPlaybackView = false
+                            }
                         }
                     
                     // 浮动球视图
@@ -63,7 +73,7 @@ struct ReadAloudApp: App {
                     }
                 }
             }
-            // 使用StackNavigationViewStyle确保导航行为正确
+            // 使用NavigationViewStyle确保正确的导航行为
             .navigationViewStyle(StackNavigationViewStyle())
             // 添加生命周期事件处理
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in

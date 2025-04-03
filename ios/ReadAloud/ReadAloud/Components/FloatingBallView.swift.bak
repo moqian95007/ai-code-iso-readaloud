@@ -50,82 +50,30 @@ struct FloatingBallView: View {
     
     // 处理浮动球点击事件
     private func handleBallTap() {
-        print("浮动球被点击")
-        
-        // 尝试从UserDefaults获取最近播放的文章ID
-        if let recentArticleIdString = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastPlayedArticleId),
-           let recentArticleId = UUID(uuidString: recentArticleIdString) {
-            
-            // 重新加载所有文章，确保文章数据是最新的
-            articleManager.loadArticles()
-            
-            // 查找最近播放的文章，确保文章仍然存在于数据库中
-            if let recentArticle = articleManager.findArticle(by: recentArticleId) {
-                // 找到了最近播放的文章，使用它并加载上次的播放列表
-                print("使用最近播放的文章: \(recentArticle.title)")
-                
-                // 保存当前使用的是上次播放的列表，防止被当前选择的列表覆盖
-                UserDefaults.standard.set(true, forKey: "isUsingLastPlaylist")
-                
-                NotificationCenter.default.post(
-                    name: Notification.Name("OpenArticle"),
-                    object: nil,
-                    userInfo: ["articleId": recentArticle.id, "useLastPlaylist": true]
-                )
-                return
-            } else {
-                print("最近播放的文章ID \(recentArticleId) 在当前数据库中找不到")
-            }
-        } else {
-            print("无法从UserDefaults获取最近播放的文章ID")
-        }
-        
-        // 如果没有找到最近播放的文章ID或文章不存在，尝试使用SpeechManager的上次播放列表
+        // 使用上一次的播放列表而不是当前列表
         if !speechManager.lastPlayedArticles.isEmpty {
-            // 找到上次播放列表中的第一篇文章
             if let lastArticle = speechManager.lastPlayedArticles.first {
-                print("使用上次播放列表中的第一篇文章: \(lastArticle.title)")
-                // 保存当前使用的是上次播放的列表，防止被当前选择的列表覆盖
-                UserDefaults.standard.set(true, forKey: "isUsingLastPlaylist")
-                
                 // 发送通知，让HomeView处理导航，并包含上一次播放列表的信息
                 NotificationCenter.default.post(
                     name: Notification.Name("OpenArticle"),
                     object: nil,
                     userInfo: ["articleId": lastArticle.id, "useLastPlaylist": true]
                 )
-                return
             }
-        } else {
-            print("SpeechManager中没有上次播放的列表")
-        }
-        
-        // 如果上述方法都失败，尝试查找有播放记录的文章
-        if let playedArticle = findLastPlayedArticle() {
-            // 如果找到最近播放过的文章，使用该文章
-            print("使用最近播放过的文章: \(playedArticle.title)")
-            // 确保这里也使用上次播放列表标记
-            UserDefaults.standard.set(true, forKey: "isUsingLastPlaylist")
-            
+        } else if let playedArticle = findLastPlayedArticle() {
+            // 如果没有保存的播放列表，使用之前的逻辑查找最近播放的文章
             NotificationCenter.default.post(
                 name: Notification.Name("OpenArticle"),
                 object: nil,
-                userInfo: ["articleId": playedArticle.id, "useLastPlaylist": true]
+                userInfo: ["articleId": playedArticle.id]
             )
-            return
-        }
-        
-        // 如果所有尝试都失败，使用第一篇文章
-        if let firstArticle = articleManager.articles.first {
+        } else if let firstArticle = articleManager.articles.first {
             // 如果没有播放记录，使用第一篇文章
-            print("没有播放记录，使用第一篇文章: \(firstArticle.title)")
             NotificationCenter.default.post(
                 name: Notification.Name("OpenArticle"),
                 object: nil,
                 userInfo: ["articleId": firstArticle.id]
             )
-        } else {
-            print("没有找到任何可播放的文章")
         }
     }
     

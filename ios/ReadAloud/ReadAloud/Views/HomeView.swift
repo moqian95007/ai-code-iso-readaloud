@@ -11,13 +11,43 @@ struct HomeView: View {
     @State private var showingEditListSheet = false
     @State private var selectedArticle: Article? = nil
     @State private var isShowingArticleReader = false
+    @State private var shouldUseLastPlaylist = false
+    
+    // 添加一个专门用于浮动球跳转的状态变量
+    @State private var isNavigatingFromBall = false
+    // 添加一个防止重复导航的标志
+    @State private var isNavigating = false
     
     var body: some View {
         Group {
             if articleManager.articles.isEmpty {
                 emptyStateView
             } else {
-                articleListView
+                ZStack {
+                    articleListView
+                    
+                    // 处理从浮动球发起的导航请求，使用专用的NavigationLink
+                    Group {
+                        if isNavigatingFromBall, 
+                           let articleId = navigationLinkTag, 
+                           let article = articleManager.findArticle(by: articleId) {
+                            NavigationLink(
+                                destination: ArticleReaderView(
+                                    article: article,
+                                    selectedListId: listManager.selectedListId,
+                                    useLastPlaylist: shouldUseLastPlaylist
+                                ),
+                                isActive: Binding<Bool>(
+                                    get: { isNavigatingFromBall },
+                                    set: { if !$0 { isNavigatingFromBall = false } }
+                                )
+                            ) {
+                                EmptyView()
+                            }
+                            .hidden()
+                        }
+                    }
+                }
             }
         }
         .navigationBarItems(
@@ -43,10 +73,23 @@ struct HomeView: View {
         // 添加监听浮动球的通知
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenArticle"))) { notification in
             print("========= HomeView收到OpenArticle通知 =========")
+            
+            // 如果已经在导航中，忽略新的导航请求
+            if isNavigating {
+                print("已经在导航过程中，忽略此次请求")
+                return
+            }
+            
             // 从通知中获取文章ID
             if let userInfo = notification.userInfo,
                let articleId = userInfo["articleId"] as? UUID {
                 print("通知中的文章ID: \(articleId)")
+                
+                // 首先确保文章存在于文章管理器中
+                if articleManager.findArticle(by: articleId) == nil {
+                    print("错误：找不到ID为 \(articleId) 的文章")
+                    return
+                }
                 
                 // 如果通知中包含列表ID，则更新当前选中的列表
                 if let selectedListId = userInfo["selectedListId"] as? UUID {
@@ -54,10 +97,63 @@ struct HomeView: View {
                     listManager.selectedListId = selectedListId
                 }
                 
-                // 激活对应的NavigationLink
-                DispatchQueue.main.async {
-                    navigationLinkTag = articleId
-                    print("设置navigationLinkTag: \(articleId)")
+                // 检查是否应该使用上一次的播放列表
+                let isUsingLastPlaylist = UserDefaults.standard.bool(forKey: "isUsingLastPlaylist")
+                
+                // 处理播放列表设置
+                if let useLastPlaylist = userInfo["useLastPlaylist"] as? Bool, useLastPlaylist || isUsingLastPlaylist {
+                    print("检测到浮动球点击，使用上一次的播放列表")
+                    // 从SpeechManager中获取上一次的播放列表
+                    let lastPlayedArticles = speechManager.lastPlayedArticles
+                    if !lastPlayedArticles.isEmpty {
+                        // 在导航前更新SpeechManager中的播放列表，确保使用的是上一次的列表
+                        speechManager.updatePlaylist(lastPlayedArticles)
+                        print("更新播放列表为上一次播放的列表，包含 \(lastPlayedArticles.count) 篇文章")
+                        shouldUseLastPlaylist = true
+                    }
+                } else {
+                    shouldUseLastPlaylist = false
+                }
+                
+                // 设置防导航循环标志
+                isNavigating = true
+                
+                // 重要修复：简化导航状态设置
+                if let useLastPlaylist = userInfo["useLastPlaylist"] as? Bool, useLastPlaylist || isUsingLastPlaylist {
+                    // 浮动球点击的场景，使用全局导航链接
+                    DispatchQueue.main.async {
+                        // 先重置导航状态，再设置新状态
+                        navigationLinkTag = nil
+                        
+                        // 设置为浮动球导航模式
+                        isNavigatingFromBall = true
+                        
+                        // 然后设置导航目标
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            navigationLinkTag = articleId
+                            print("浮动球跳转: 设置导航状态 navigationLinkTag=\(articleId), 使用全局导航")
+                        }
+                    }
+                } else {
+                    // 其他场景，使用普通导航链接
+                    DispatchQueue.main.async {
+                        // 先重置导航状态，再设置新状态
+                        navigationLinkTag = nil
+                        
+                        // 设置为普通导航模式
+                        isNavigatingFromBall = false
+                        
+                        // 然后设置导航目标
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            navigationLinkTag = articleId
+                            print("普通跳转: 设置导航状态 navigationLinkTag=\(articleId), 使用普通导航")
+                        }
+                    }
+                }
+                
+                // 延迟重置导航锁定状态
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isNavigating = false
                 }
             } else {
                 print("通知中没有找到有效的文章ID")
@@ -146,6 +242,7 @@ struct HomeView: View {
                 Text("\(listManager.selectedList?.name ?? "阅读列表") · \(filteredArticles.count)篇文章")
                     .font(.subheadline)
                     .foregroundColor(.gray)
+                
                 Spacer()
             }
             .padding(.horizontal)
@@ -165,7 +262,27 @@ struct HomeView: View {
             if !filteredArticles.isEmpty {
                 Button(action: {
                     if let firstArticle = filteredArticles.first {
-                        navigationLinkTag = firstArticle.id
+                        // 更新播放列表为当前筛选的文章
+                        speechManager.updatePlaylist(filteredArticles)
+                        
+                        // 设置不使用上次播放列表标志
+                        UserDefaults.standard.set(false, forKey: "isUsingLastPlaylist")
+                        shouldUseLastPlaylist = false
+                        
+                        // 确保不使用浮动球导航
+                        isNavigatingFromBall = false
+                        
+                        // 先重置导航状态，再设置
+                        DispatchQueue.main.async {
+                            navigationLinkTag = nil
+                            
+                            // 延迟设置，避免SwiftUI导航栈冲突
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // 激活导航
+                                navigationLinkTag = firstArticle.id
+                                print("播放全部按钮: 导航到首篇文章 \(firstArticle.title)")
+                            }
+                        }
                     }
                 }) {
                     HStack(spacing: 8) {
@@ -211,18 +328,24 @@ struct HomeView: View {
     // 单个文章行
     private func articleRow(for article: Article) -> some View {
         ZStack {
-            // 隐藏的 NavigationLink，不显示任何内容（包括箭头）
-            NavigationLink(
-                destination: ArticleReaderView(
-                    article: article,
-                    selectedListId: listManager.selectedListId
-                ), 
-                tag: article.id, 
-                selection: $navigationLinkTag
-            ) {
-                EmptyView()
+            // 隐藏的 NavigationLink，只有在非浮动球导航时才显示
+            Group {
+                if !isNavigatingFromBall {
+                    NavigationLink(
+                        destination: ArticleReaderView(
+                            article: article,
+                            selectedListId: listManager.selectedListId,
+                            useLastPlaylist: shouldUseLastPlaylist
+                        ), 
+                        tag: article.id, 
+                        selection: $navigationLinkTag
+                    ) {
+                        EmptyView()
+                    }
+                    .id(article.id)  // 添加唯一标识，避免SwiftUI重用视图导致的问题
+                    .opacity(0)
+                }
             }
-            .opacity(0)
             
             // 实际显示的内容
             HStack {
@@ -236,7 +359,28 @@ struct HomeView: View {
                 
                 // 自定义播放按钮（不使用NavigationLink作为按钮）
                 Button(action: {
-                    navigationLinkTag = article.id  // 激活导航
+                    // 设置播放上下文
+                    let filteredArticles = filterArticles(articleManager.articles)
+                    speechManager.updatePlaylist(filteredArticles)
+                    
+                    // 不使用上次播放列表
+                    UserDefaults.standard.set(false, forKey: "isUsingLastPlaylist")
+                    shouldUseLastPlaylist = false
+                    
+                    // 确保不使用浮动球导航模式
+                    isNavigatingFromBall = false
+                    
+                    // 先重置导航状态，再设置
+                    DispatchQueue.main.async {
+                        navigationLinkTag = nil
+                        
+                        // 延迟设置，避免SwiftUI导航栈冲突
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            // 激活导航
+                            navigationLinkTag = article.id
+                            print("文章播放按钮: 导航到文章 \(article.title)")
+                        }
+                    }
                 }) {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 38))
