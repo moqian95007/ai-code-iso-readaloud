@@ -32,11 +32,13 @@ struct ArticleReaderView: View {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var articleManager = ArticleManager()
     @StateObject private var listManager = ArticleListManager()
+    @StateObject private var timerManager = TimerManager.shared
     
     // 弹窗状态
     @State private var showSpeedSelector: Bool = false
     @State private var showVoiceSelector: Bool = false
     @State private var showArticleList: Bool = false
+    @State private var showTimerSheet: Bool = false
     @State private var availableVoices: [AVSpeechSynthesisVoice] = []
     
     // 应用启动状态标志
@@ -50,6 +52,7 @@ struct ArticleReaderView: View {
     
     // 用于取消通知订阅
     @State private var playNextSubscription: AnyCancellable?
+    @State private var timerCompletedSubscription: AnyCancellable?
     
     // 获取当前列表中的所有文章
     private var listArticles: [Article] {
@@ -276,6 +279,10 @@ struct ArticleReaderView: View {
                             }
                         }
                         
+                        // 点击播放按钮时设置手动暂停标志为 true
+                        // 这可以防止系统将从暂停位置继续播放误识别为播放完成
+                        speechDelegate.wasManuallyPaused = true
+                        
                         if speechManager.isResuming {
                             speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
                         } else {
@@ -329,16 +336,61 @@ struct ArticleReaderView: View {
                     articleManager.loadArticles()
                     showArticleList = true
                 }) {
-                    HStack(spacing: 5) {
+                    VStack(spacing: 5) {
                         Image(systemName: "list.bullet")
                             .font(.system(size: 18))
                         
                         Text("列表")
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .frame(width: 60, height: 60)
                     .background(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
+                }
+                
+                // 定时关闭按钮
+                Button(action: {
+                    showTimerSheet = true
+                }) {
+                    VStack(spacing: 5) {
+                        // 根据定时器状态显示不同图标
+                        if timerManager.isTimerActive {
+                            ZStack {
+                                Image(systemName: "timer")
+                                    .font(.system(size: 18))
+                                
+                                // 如果定时器激活，显示时间或标记
+                                if timerManager.selectedOption == .afterChapter {
+                                    Text("章")
+                                        .font(.system(size: 9))
+                                        .offset(x: 0, y: 2)
+                                }
+                            }
+                        } else {
+                            Image(systemName: "timer")
+                                .font(.system(size: 18))
+                        }
+                        
+                        // 显示定时状态或"定时"文字
+                        if timerManager.isTimerActive {
+                            if timerManager.selectedOption == .afterChapter {
+                                Text("本章后")
+                                    .font(.system(size: 14))
+                            } else if !timerManager.formattedRemainingTime().isEmpty {
+                                Text(timerManager.formattedRemainingTime())
+                                    .font(.system(size: 14))
+                                    .monospacedDigit()
+                            } else {
+                                Text("定时")
+                                    .font(.system(size: 14))
+                            }
+                        } else {
+                            Text("定时")
+                                .font(.system(size: 14))
+                        }
+                    }
+                    .frame(width: 60, height: 60)
+                    .background(timerManager.isTimerActive ? Color.orange.opacity(0.3) : Color.gray.opacity(0.2))
                     .cornerRadius(8)
                 }
                 
@@ -346,15 +398,14 @@ struct ArticleReaderView: View {
                 Button(action: {
                     themeManager.toggleDarkMode()
                 }) {
-                    HStack(spacing: 5) {
+                    VStack(spacing: 5) {
                         Image(systemName: themeManager.isDarkMode ? "moon.fill" : "sun.max.fill")
                             .font(.system(size: 18))
                         
                         Text(themeManager.isDarkMode ? "夜间" : "日间")
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .frame(width: 60, height: 60)
                     .background(Color.gray.opacity(0.2))
                     .cornerRadius(8)
                 }
@@ -363,28 +414,15 @@ struct ArticleReaderView: View {
                 Button(action: {
                     themeManager.nextFontSize()
                 }) {
-                    HStack(spacing: 5) {
-                        // 显示单个"A"，大小根据当前字体选项动态调整
-                        switch themeManager.fontSizeOption {
-                        case .small:
-                            Text("A")
-                                .font(.system(size: 16))
-                        case .medium:
-                            Text("A")
-                                .font(.system(size: 20))
-                        case .large:
-                            Text("A")
-                                .font(.system(size: 24))
-                        case .extraLarge:
-                            Text("A")
-                                .font(.system(size: 28))
-                        }
+                    VStack(spacing: 5) {
+                        // 使用固定大小的"A"
+                        Text("A")
+                            .font(.system(size: 22))
                         
                         Text(themeManager.fontSizeOption.rawValue)
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .frame(width: 60, height: 60)
                     .background(Color.gray.opacity(0.2))
                     .cornerRadius(8)
                 }
@@ -411,15 +449,14 @@ struct ArticleReaderView: View {
                         self.showVoiceSelector = true
                     }
                 }) {
-                    HStack(spacing: 5) {
+                    VStack(spacing: 5) {
                         Image(systemName: "person.wave.2")
                             .font(.system(size: 18))
                         
                         Text("主播")
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .frame(width: 60, height: 60)
                     .background(Color.gray.opacity(0.2))
                     .cornerRadius(8)
                 }
@@ -524,9 +561,15 @@ struct ArticleReaderView: View {
             
             // 检查是否是从列表循环模式导航而来
             let isFromListRepeat = UserDefaults.standard.bool(forKey: UserDefaultsKeys.isFromListRepeat)
-            print("是否从列表循环跳转而来: \(isFromListRepeat)")
             
-            if isFromListRepeat && speechManager.playbackMode == .listRepeat {
+            // 获取是否是通过浮动球进入
+            let isFromFloatingBall = UserDefaults.standard.bool(forKey: "isFromFloatingBall")
+            
+            print("是否从列表循环跳转而来: \(isFromListRepeat)")
+            print("是否从浮动球进入: \(isFromFloatingBall)")
+            
+            // 只有在从列表循环模式导航且非浮动球进入时才自动播放
+            if isFromListRepeat && speechManager.playbackMode == .listRepeat && !isFromFloatingBall {
                 print("检测到是从列表循环跳转而来，准备自动开始播放")
                 // 重置标记
                 UserDefaults.standard.set(false, forKey: UserDefaultsKeys.isFromListRepeat)
@@ -545,10 +588,22 @@ struct ArticleReaderView: View {
                 }
             }
             
+            // 重置浮动球标记
+            if isFromFloatingBall {
+                UserDefaults.standard.set(false, forKey: "isFromFloatingBall")
+            }
+            
             // 打印列表循环状态
             if currentListArticles.count == 1 {
                 print("⚠️ 注意：列表中只有一篇文章，列表循环将重新播放同一篇文章")
             }
+            
+            // 监听定时器完成通知
+            timerCompletedSubscription = NotificationCenter.default.publisher(for: Notification.Name("TimerCompleted"))
+                .receive(on: RunLoop.main)
+                .sink { _ in
+                    print("定时器完成，已停止播放")
+                }
             
             // 重置初始化标志，允许下次初始化
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -575,6 +630,7 @@ struct ArticleReaderView: View {
             
             // 取消通知订阅
             playNextSubscription?.cancel()
+            timerCompletedSubscription?.cancel()
             
             print("==============================================")
         }
@@ -630,6 +686,9 @@ struct ArticleReaderView: View {
                 },
                 isPresented: $showArticleList
             )
+        }
+        .sheet(isPresented: $showTimerSheet) {
+            TimerSheetView(isPresented: $showTimerSheet)
         }
         .background(themeManager.backgroundColor())
         .foregroundColor(themeManager.foregroundColor())

@@ -52,6 +52,9 @@ struct FloatingBallView: View {
     private func handleBallTap() {
         print("浮动球被点击")
         
+        // 设置标志表明是从浮动球进入，防止自动播放
+        UserDefaults.standard.set(true, forKey: "isFromFloatingBall")
+        
         // 尝试从UserDefaults获取最近播放的文章ID
         if let recentArticleIdString = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastPlayedArticleId),
            let recentArticleId = UUID(uuidString: recentArticleIdString) {

@@ -17,6 +17,10 @@ struct UserDefaultsKeys {
     // 列表循环跳转标记
     static let isFromListRepeat = "isFromListRepeat"
     
+    // 定时关闭相关设置
+    static let timerOption = "timerOption"
+    static let customTimerMinutes = "customTimerMinutes"
+    
     // 为每篇文章创建唯一的键
     static func lastPlaybackPosition(for articleId: UUID) -> String {
         return "lastPlaybackPosition_\(articleId.uuidString)"

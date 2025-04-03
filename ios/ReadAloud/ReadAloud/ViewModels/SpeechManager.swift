@@ -180,6 +180,37 @@ class SpeechManager: ObservableObject {
             return
         }
         
+        // 检查定时关闭选项 - 播完本章后停止
+        let timerManager = TimerManager.shared
+        if timerManager.isTimerActive && timerManager.selectedOption == .afterChapter {
+            print("检测到[播完本章后停止]定时选项，停止播放")
+            
+            // 重置所有状态
+            isResuming = false
+            currentPlaybackPosition = 0
+            currentProgress = 0.0
+            currentTime = 0.0
+            isPlaying = false
+            
+            // 清除保存的播放进度
+            if let articleId = currentArticle?.id {
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            }
+            
+            // 取消定时器
+            timerManager.cancelTimer()
+            
+            // 发送定时器完成通知
+            NotificationCenter.default.post(name: Notification.Name("TimerCompleted"), object: nil)
+            
+            // 更新UI
+            updateNowPlayingInfo()
+            return
+        }
+        
         // 处理从中间位置开始播放且完成的情况
         if isStartedFromMiddle && !speechDelegate.wasManuallyPaused {
             print("从中间位置开始的播放已完成，直接跳到下一篇或重置")
@@ -637,38 +668,44 @@ class SpeechManager: ObservableObject {
     
     // 暂停朗读
     func pauseSpeaking() {
-        if synthesizer.isSpeaking {
-            print("========= 用户暂停朗读 =========")
-            let currentRange = speechDelegate.highlightRange
-            currentPlaybackPosition = currentRange.location + currentRange.length
-            isResuming = true
-            
-            print("保存暂停位置: \(currentPlaybackPosition)")
-            print("保存暂停进度: \(currentProgress)")
-            
-            // 标记为手动暂停
-            speechDelegate.wasManuallyPaused = true
-            
-            // 停止计时器但保留当前进度
-            stopTimer()
-            
-            // 保存当前播放进度
-            savePlaybackProgress()
-            
-            // 暂停朗读
-            synthesizer.stopSpeaking(at: .word)
-            
-            // 手动确保SpeechDelegate状态正确
-            speechDelegate.isSpeaking = false
-            
-            // 更新状态
-            isPlaying = false
-            
-            // 更新锁屏界面信息
-            updateNowPlayingInfo()
-            
-            print("暂停朗读完成")
-            print("=================================")
+        guard isPlaying else { return }
+        
+        // 添加防抖动，避免短时间内多次触发
+        let now = Date()
+        if now.timeIntervalSince(lastStartTime) < 0.5 {
+            print("暂停操作太频繁，忽略")
+            return
+        }
+        
+        // 记录下播放位置
+        if !synthesizer.isPaused {
+            synthesizer.pauseSpeaking(at: .immediate)
+        }
+        
+        // 停止计时器
+        timer?.invalidate()
+        timer = nil
+        
+        // 更新状态
+        isPlaying = false
+        isResuming = true
+        
+        // 保存播放进度
+        if let articleId = currentArticle?.id {
+            UserDefaults.standard.set(currentPlaybackPosition, forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+            UserDefaults.standard.set(currentProgress, forKey: UserDefaultsKeys.lastProgress(for: articleId))
+            UserDefaults.standard.set(currentTime, forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+            UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+        }
+        
+        // 更新锁屏控制中心信息
+        updateNowPlayingInfo()
+        
+        // 检查是否是被定时器触发的暂停
+        let timerManager = TimerManager.shared
+        if timerManager.isTimerActive && timerManager.selectedOption != .afterChapter && timerManager.remainingSeconds <= 0 {
+            // 发送通知
+            NotificationCenter.default.post(name: Notification.Name("TimerCompleted"), object: nil)
         }
     }
     
