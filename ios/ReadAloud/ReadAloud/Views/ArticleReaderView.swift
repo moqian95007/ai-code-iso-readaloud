@@ -30,8 +30,8 @@ struct ArticleReaderView: View {
     // 状态管理
     @StateObject private var speechManager = SpeechManager.shared
     @StateObject private var themeManager = ThemeManager.shared
-    @StateObject private var articleManager = ArticleManager()
-    @StateObject private var listManager = ArticleListManager()
+    @ObservedObject private var articleManager = ArticleManager.shared
+    @ObservedObject private var listManager = ArticleListManager.shared
     @StateObject private var timerManager = TimerManager.shared
     
     // 弹窗状态
@@ -101,88 +101,29 @@ struct ArticleReaderView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // 标题
-            Text(article.title)
-                .font(.title)
-                .padding()
-                .lineLimit(1)
-                .truncationMode(.tail)
-            
-            // 文本展示区
-            ScrollViewReader { scrollView in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        // 将长文本分成段落
-                        let paragraphs = article.content.components(separatedBy: "\n\n")
-                        
-                        // 遍历段落并分别处理
-                        ForEach(0..<paragraphs.count, id: \.self) { index in
-                            let paragraph = paragraphs[index]
-                            let paragraphId = "paragraph_\(index)"
-                            
-                            // 计算该段落是否包含当前朗读的文本
-                            let containsHighlight = speechManager.paragraphContainsHighlight(
-                                paragraph: paragraph, 
-                                fullText: article.content
-                            )
-                            
-                            Text(paragraph)
-                                .font(.system(size: themeManager.fontSize))
-                                .padding(5)
-                                .background(themeManager.highlightBackgroundColor(isHighlighted: containsHighlight))
-                                .id(paragraphId)
-                                .onTapGesture {
-                                    handleTextTap(paragraphIndex: index, paragraph: paragraph)
-                                }
-                        }
+            // 文章正文区域
+            ScrollView {
+                ScrollViewReader { scrollView in
+                    VStack(alignment: .leading, spacing: 0) {
+                        // 高亮显示的文本内容
+                        ArticleHighlightedText(
+                            text: article.content,
+                            highlightRange: speechDelegate.highlightRange,
+                            onTap: handleTextTap,
+                            themeManager: themeManager
+                        )
+                        .padding(.horizontal)
                     }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .background(themeManager.scrollViewBackgroundColor())
-                .cornerRadius(10)
-                .padding()
-                .onChange(of: speechDelegate.highlightRange) { _ in
-                    scrollToCurrentParagraph(scrollView: scrollView)
+                    .onChange(of: speechDelegate.highlightRange) { _ in
+                        scrollToCurrentParagraph(scrollView: scrollView)
+                    }
                 }
             }
             
-            // 进度控制区域
-            VStack(spacing: 5) {
-                // 上次播放位置恢复提示
-                if speechManager.isResuming && !speechManager.isPlaying && isAppLaunch {
-                    HStack {
-                        Button(action: {
-                            speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
-                            isAppLaunch = false
-                        }) {
-                            Label("继续上次播放", systemImage: "play.circle")
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 10)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        
-                        Spacer()
-                        
-                        // 从头开始按钮
-                        Button(action: {
-                            // 重置恢复状态并清除保存的进度
-                            speechManager.stopSpeaking()
-                            isAppLaunch = false
-                        }) {
-                            Text("从头开始")
-                                .foregroundColor(.gray)
-                        }
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 10)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                    .padding(.vertical, 5)
-                }
-                
+            Spacer()
+            
+            // 底部播放控制区域
+            VStack {
                 // 时间显示
                 HStack {
                     Text(speechManager.formatTime(speechManager.currentTime))
@@ -192,302 +133,440 @@ struct ArticleReaderView: View {
                         .font(.caption)
                 }
                 
-                // 进度条和快进/快退按钮
-                HStack {
-                    // 后退15秒按钮
-                    Button(action: {
-                        speechManager.skipBackward(seconds: 15)
-                    }) {
-                        Image(systemName: "gobackward.15")
-                            .font(.system(size: 22))
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.trailing, 8)
-                    
-                    // 进度条，支持拖动
-                    Slider(
-                        value: $speechManager.currentProgress,
-                        in: 0...1,
-                        onEditingChanged: { editing in
-                            speechManager.isDragging = editing
-                            
-                            if !editing {
-                                speechManager.seekToProgress(speechManager.currentProgress)
-                            }
-                        }
-                    )
-                    .accentColor(themeManager.isDarkMode ? .white : .blue)
-                    
-                    // 前进15秒按钮
-                    Button(action: {
-                        speechManager.skipForward(seconds: 15)
-                    }) {
-                        Image(systemName: "goforward.15")
-                            .font(.system(size: 22))
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.leading, 8)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 10)
-            
-            // 播放控制区
-            HStack {
-                Spacer()
-                
-                // 语速调节按钮
-                Button(action: {
-                    showSpeedSelector = true
-                }) {
-                    VStack {
-                        Image(systemName: "speedometer")
-                            .font(.system(size: 22))
-                        Text("\(String(format: "%.1f", speechManager.selectedRate))x")
-                            .font(.system(size: 16))
-                    }
-                    .frame(width: 70)  // 设置固定宽度
-                    .padding(8)
-                }
-                
-                Spacer()
-                
-                // 上一篇按钮
-                Button(action: {
-                    playPreviousArticle()
-                }) {
-                    Image(systemName: "backward.end.fill")
-                        .resizable()
-                        .frame(width: 30, height: 30)
-                        .foregroundColor(themeManager.isDarkMode ? .white : .blue)
-                }
-                .padding(.trailing, 20)
-                
-                // 播放/暂停按钮
-                Button(action: {
-                    if speechManager.isPlaying {
-                        speechManager.pauseSpeaking()
-                    } else {
-                        // 检查语音语言是否匹配
-                        let articleLanguage = article.detectLanguage()
-                        if let voice = speechManager.getSelectedVoice() {
-                            let isCompatible = isLanguageCompatible(voiceLanguage: voice.language, articleLanguage: articleLanguage)
-                            if !isCompatible {
-                                // 显示错误提示
-                                showVoiceLanguageError = true
-                                return
-                            }
-                        }
-                        
-                        // 点击播放按钮时设置手动暂停标志为 true
-                        // 这可以防止系统将从暂停位置继续播放误识别为播放完成
-                        speechDelegate.wasManuallyPaused = true
-                        
-                        if speechManager.isResuming {
-                            speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
-                        } else {
-                            speechManager.startSpeaking()
-                        }
-                        isAppLaunch = false
-                    }
-                }) {
-                    Image(systemName: speechManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .resizable()
-                        .frame(width: 50, height: 50)
-                        .foregroundColor(themeManager.isDarkMode ? .white : .blue)
-                }
-                
-                // 下一篇按钮
-                Button(action: {
-                    playNextArticle()
-                }) {
-                    Image(systemName: "forward.end.fill")
-                        .resizable()
-                        .frame(width: 30, height: 30)
-                        .foregroundColor(themeManager.isDarkMode ? .white : .blue)
-                }
-                .padding(.leading, 20)
-                
-                Spacer()
-                
-                // 播放模式切换按钮
-                Button(action: {
-                    speechManager.togglePlaybackMode()
-                }) {
-                    VStack {
-                        Image(systemName: speechManager.playbackMode.iconName)
-                            .font(.system(size: 22))
-                        Text(speechManager.playbackMode.rawValue)
-                            .font(.system(size: 16))
-                    }
-                    .frame(width: 70)  // 设置固定宽度
-                    .padding(8)
-                }
-                
-                Spacer()
-            }
-            .padding(.bottom, 15)
-            
-            // 设置按钮区域
-            HStack(spacing: 20) {
-                // 列表按钮
-                Button(action: {
-                    // 确保已加载文章
-                    articleManager.loadArticles()
-                    showArticleList = true
-                }) {
-                    VStack(spacing: 5) {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 18))
-                        
-                        Text("列表")
-                            .font(.system(size: 14))
-                    }
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                }
-                
-                // 定时关闭按钮
-                Button(action: {
-                    showTimerSheet = true
-                }) {
-                    VStack(spacing: 5) {
-                        // 根据定时器状态显示不同图标
-                        if timerManager.isTimerActive {
-                            ZStack {
-                                Image(systemName: "timer")
-                                    .font(.system(size: 18))
+                // 进度控制区域
+                VStack(spacing: 5) {
+                    // 上次播放位置恢复提示
+                    if speechManager.isResuming && !speechManager.isPlaying && isAppLaunch {
+                        HStack {
+                            Button(action: {
+                                // 设置手动暂停标志，防止播放完成后自动跳转
+                                speechDelegate.wasManuallyPaused = true
+                                print("继续上次播放：设置wasManuallyPaused=true，防止播放完成后自动跳转")
                                 
-                                // 如果定时器激活，显示时间或标记
-                                if timerManager.selectedOption == .afterChapter {
-                                    Text("章")
-                                        .font(.system(size: 9))
-                                        .offset(x: 0, y: 2)
+                                // 从保存的位置开始播放
+                                speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
+                                isAppLaunch = false
+                            }) {
+                                Label("继续上次播放", systemImage: "play.circle")
+                                    .foregroundColor(.blue)
+                            }
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                            
+                            Spacer()
+                            
+                            // 从头开始按钮
+                            Button(action: {
+                                // 重置恢复状态并清除保存的进度
+                                speechManager.stopSpeaking()
+                                isAppLaunch = false
+                            }) {
+                                Text("从头开始")
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .padding(.vertical, 5)
+                    }
+                    
+                    // 进度条和快进/快退按钮
+                    HStack {
+                        // 后退15秒按钮
+                        Button(action: {
+                            speechManager.skipBackward(seconds: 15)
+                        }) {
+                            Image(systemName: "gobackward.15")
+                                .font(.system(size: 22))
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.trailing, 8)
+                        
+                        // 进度条，支持拖动
+                        Slider(
+                            value: $speechManager.currentProgress,
+                            in: 0...1,
+                            onEditingChanged: { editing in
+                                speechManager.isDragging = editing
+                                
+                                if !editing {
+                                    speechManager.seekToProgress(speechManager.currentProgress)
                                 }
                             }
+                        )
+                        .accentColor(themeManager.isDarkMode ? .white : .blue)
+                        
+                        // 前进15秒按钮
+                        Button(action: {
+                            speechManager.skipForward(seconds: 15)
+                        }) {
+                            Image(systemName: "goforward.15")
+                                .font(.system(size: 22))
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.leading, 8)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 10)
+                
+                // 播放控制区
+                HStack {
+                    Spacer()
+                    
+                    // 语速调节按钮
+                    Button(action: {
+                        showSpeedSelector = true
+                    }) {
+                        VStack {
+                            Image(systemName: "speedometer")
+                                .font(.system(size: 22))
+                            Text("\(String(format: "%.1f", speechManager.selectedRate))x")
+                                .font(.system(size: 16))
+                        }
+                        .frame(width: 70)  // 设置固定宽度
+                        .padding(8)
+                    }
+                    
+                    Spacer()
+                    
+                    // 上一篇按钮
+                    Button(action: {
+                        playPreviousArticle()
+                    }) {
+                        Image(systemName: "backward.end.fill")
+                            .resizable()
+                            .frame(width: 30, height: 30)
+                            .foregroundColor(themeManager.isDarkMode ? .white : .blue)
+                    }
+                    .padding(.trailing, 20)
+                    
+                    // 播放/暂停按钮
+                    Button(action: {
+                        if speechManager.isPlaying {
+                            speechManager.pauseSpeaking()
                         } else {
-                            Image(systemName: "timer")
-                                .font(.system(size: 18))
+                            // 检查语音语言是否匹配
+                            let articleLanguage = article.detectLanguage()
+                            if let voice = speechManager.getSelectedVoice() {
+                                let isCompatible = isLanguageCompatible(voiceLanguage: voice.language, articleLanguage: articleLanguage)
+                                if !isCompatible {
+                                    // 显示错误提示
+                                    showVoiceLanguageError = true
+                                    return
+                                }
+                            }
+                            
+                            // 点击播放按钮时设置手动暂停标志为 true
+                            // 这可以防止系统将从暂停位置继续播放误识别为播放完成
+                            speechDelegate.wasManuallyPaused = true
+                            
+                            if speechManager.isResuming {
+                                // 从保存的位置开始播放，确保设置手动暂停标志为true
+                                // 防止播放完成时自动跳转到下一章
+                                speechDelegate.wasManuallyPaused = true
+                                speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
+                            } else {
+                                speechManager.startSpeaking()
+                            }
+                            isAppLaunch = false
+                        }
+                    }) {
+                        Image(systemName: speechManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .resizable()
+                            .frame(width: 50, height: 50)
+                            .foregroundColor(themeManager.isDarkMode ? .white : .blue)
+                    }
+                    
+                    // 下一篇按钮
+                    Button(action: {
+                        playNextArticle()
+                    }) {
+                        Image(systemName: "forward.end.fill")
+                            .resizable()
+                            .frame(width: 30, height: 30)
+                            .foregroundColor(themeManager.isDarkMode ? .white : .blue)
+                    }
+                    .padding(.leading, 20)
+                    
+                    Spacer()
+                    
+                    // 播放模式切换按钮
+                    Button(action: {
+                        speechManager.togglePlaybackMode()
+                    }) {
+                        VStack {
+                            Image(systemName: speechManager.playbackMode.iconName)
+                                .font(.system(size: 22))
+                            Text(speechManager.playbackMode.rawValue)
+                                .font(.system(size: 16))
+                        }
+                        .frame(width: 70)  // 设置固定宽度
+                        .padding(8)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.bottom, 15)
+                
+                // 设置按钮区域
+                HStack(spacing: 20) {
+                    // 列表按钮
+                    Button(action: {
+                        // 确保已加载文章
+                        articleManager.loadArticles()
+                        
+                        // 发送通知告知需要更新播放列表
+                        NotificationCenter.default.post(name: Notification.Name("OpenArticleList"), object: nil)
+                        
+                        // 使用SpeechManager的播放列表
+                        currentListArticles = speechManager.lastPlayedArticles
+                        
+                        // 确保当前列表有文章
+                        if currentListArticles.isEmpty {
+                            print("警告: 当前播放列表为空，尝试使用SpeechManager中的lastPlayedArticles")
+                            currentListArticles = speechManager.lastPlayedArticles
                         }
                         
-                        // 显示定时状态或"定时"文字
-                        if timerManager.isTimerActive {
-                            if timerManager.selectedOption == .afterChapter {
-                                Text("本章后")
-                                    .font(.system(size: 14))
-                            } else if !timerManager.formattedRemainingTime().isEmpty {
-                                Text(timerManager.formattedRemainingTime())
-                                    .font(.system(size: 14))
-                                    .monospacedDigit()
+                        // 打印当前列表文章数量
+                        print("列表按钮 - 播放列表文章数: \(currentListArticles.count)")
+                        
+                        // 显示列表弹窗
+                        showArticleList = true
+                    }) {
+                        VStack(spacing: 5) {
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 18))
+                            
+                            Text("列表")
+                                .font(.system(size: 14))
+                        }
+                        .frame(width: 60, height: 60)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                    }
+                    
+                    // 定时关闭按钮
+                    Button(action: {
+                        showTimerSheet = true
+                    }) {
+                        VStack(spacing: 5) {
+                            // 根据定时器状态显示不同图标
+                            if timerManager.isTimerActive {
+                                ZStack {
+                                    Image(systemName: "timer")
+                                        .font(.system(size: 18))
+                                    
+                                    // 如果定时器激活，显示时间或标记
+                                    if timerManager.selectedOption == .afterChapter {
+                                        Text("章")
+                                            .font(.system(size: 9))
+                                            .offset(x: 0, y: 2)
+                                    }
+                                }
+                            } else {
+                                Image(systemName: "timer")
+                                    .font(.system(size: 18))
+                            }
+                            
+                            // 显示定时状态或"定时"文字
+                            if timerManager.isTimerActive {
+                                if timerManager.selectedOption == .afterChapter {
+                                    Text("本章后")
+                                        .font(.system(size: 14))
+                                } else if !timerManager.formattedRemainingTime().isEmpty {
+                                    Text(timerManager.formattedRemainingTime())
+                                        .font(.system(size: 14))
+                                        .monospacedDigit()
+                                } else {
+                                    Text("定时")
+                                        .font(.system(size: 14))
+                                }
                             } else {
                                 Text("定时")
                                     .font(.system(size: 14))
                             }
-                        } else {
-                            Text("定时")
+                        }
+                        .frame(width: 60, height: 60)
+                        .background(timerManager.isTimerActive ? Color.orange.opacity(0.3) : Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                    }
+                    
+                    // 日间/夜间模式切换按钮
+                    Button(action: {
+                        themeManager.toggleDarkMode()
+                    }) {
+                        VStack(spacing: 5) {
+                            Image(systemName: themeManager.isDarkMode ? "moon.fill" : "sun.max.fill")
+                                .font(.system(size: 18))
+                            
+                            Text(themeManager.isDarkMode ? "夜间" : "日间")
                                 .font(.system(size: 14))
                         }
+                        .frame(width: 60, height: 60)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
                     }
-                    .frame(width: 60, height: 60)
-                    .background(timerManager.isTimerActive ? Color.orange.opacity(0.3) : Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                }
-                
-                // 日间/夜间模式切换按钮
-                Button(action: {
-                    themeManager.toggleDarkMode()
-                }) {
-                    VStack(spacing: 5) {
-                        Image(systemName: themeManager.isDarkMode ? "moon.fill" : "sun.max.fill")
-                            .font(.system(size: 18))
-                        
-                        Text(themeManager.isDarkMode ? "夜间" : "日间")
-                            .font(.system(size: 14))
-                    }
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                }
-                
-                // 字体大小切换按钮
-                Button(action: {
-                    themeManager.nextFontSize()
-                }) {
-                    VStack(spacing: 5) {
-                        // 使用固定大小的"A"
-                        Text("A")
-                            .font(.system(size: 22))
-                        
-                        Text(themeManager.fontSizeOption.rawValue)
-                            .font(.system(size: 14))
-                    }
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                }
-                
-                // 切换主播按钮
-                Button(action: {
-                    // 获取所有可用的语音列表
-                    let allVoices = AVSpeechSynthesisVoice.speechVoices()
-                    print("获取到 \(allVoices.count) 个语音")
                     
-                    // 直接设置可用语音列表
-                    self.availableVoices = allVoices
-                    print("设置到 availableVoices: \(self.availableVoices.count) 个语音")
-                    
-                    // 如果没有选择语音或选择的语音不在可用语音中，默认选择第一个语音
-                    if speechManager.selectedVoiceIdentifier.isEmpty || !self.availableVoices.contains(where: { $0.identifier == speechManager.selectedVoiceIdentifier }) {
-                        if let defaultVoice = self.availableVoices.first {
-                            speechManager.selectedVoiceIdentifier = defaultVoice.identifier
+                    // 字体大小切换按钮
+                    Button(action: {
+                        themeManager.nextFontSize()
+                    }) {
+                        VStack(spacing: 5) {
+                            // 使用固定大小的"A"
+                            Text("A")
+                                .font(.system(size: 22))
+                            
+                            Text(themeManager.fontSizeOption.rawValue)
+                                .font(.system(size: 14))
                         }
+                        .frame(width: 60, height: 60)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
                     }
                     
-                    // 显示语音选择器
-                    DispatchQueue.main.async {
-                        self.showVoiceSelector = true
-                    }
-                }) {
-                    VStack(spacing: 5) {
-                        Image(systemName: "person.wave.2")
-                            .font(.system(size: 18))
+                    // 切换主播按钮
+                    Button(action: {
+                        // 获取所有可用的语音列表
+                        let allVoices = AVSpeechSynthesisVoice.speechVoices()
+                        print("获取到 \(allVoices.count) 个语音")
                         
-                        Text("主播")
-                            .font(.system(size: 14))
+                        // 直接设置可用语音列表
+                        self.availableVoices = allVoices
+                        print("设置到 availableVoices: \(self.availableVoices.count) 个语音")
+                        
+                        // 如果没有选择语音或选择的语音不在可用语音中，默认选择第一个语音
+                        if speechManager.selectedVoiceIdentifier.isEmpty || !self.availableVoices.contains(where: { $0.identifier == speechManager.selectedVoiceIdentifier }) {
+                            if let defaultVoice = self.availableVoices.first {
+                                speechManager.selectedVoiceIdentifier = defaultVoice.identifier
+                            }
+                        }
+                        
+                        // 显示语音选择器
+                        DispatchQueue.main.async {
+                            self.showVoiceSelector = true
+                        }
+                    }) {
+                        VStack(spacing: 5) {
+                            Image(systemName: "person.wave.2")
+                                .font(.system(size: 18))
+                            
+                            Text("主播")
+                                .font(.system(size: 14))
+                        }
+                        .frame(width: 60, height: 60)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
                     }
-                    .frame(width: 60, height: 60)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
                 }
+                .padding(.bottom, 30)
             }
-            .padding(.bottom, 30)
         }
         .onAppear {
             print("========= ArticleReaderView.onAppear =========")
             
-            // 添加状态变量防止过度频繁的调用
-            struct AppearState {
-                static var lastAppearTime: Date = Date(timeIntervalSince1970: 0)
-                static var isInitializing: Bool = false
+            // 记录当前播放内容类型为文章
+            UserDefaults.standard.set("article", forKey: "lastPlayedContentType")
+            
+            // 隐藏底部标签栏
+            hideTabBar()
+            
+            // 订阅通知
+            self.playNextSubscription = NotificationCenter.default.publisher(for: Notification.Name("PlayNextArticle"))
+                .sink { _ in
+                    print("收到PlayNextArticle通知")
+                    
+                    // 避免短时间内重复触发
+                    let now = Date()
+                    if now.timeIntervalSince(Self.lastPlayNextTime) < 1.0 {
+                        print("忽略重复的通知")
+                        return
+                    }
+                    
+                    Self.lastPlayNextTime = now
+                    
+                    // 播放下一篇文章
+                    self.playNextArticle()
+                }
+            
+            // 订阅定时器完成通知
+            self.timerCompletedSubscription = NotificationCenter.default.publisher(for: Notification.Name("TimerCompleted"))
+                .sink { _ in
+                    print("收到定时器完成通知，停止播放")
+                    
+                    // 如果正在播放，则暂停
+                    if self.speechManager.isPlaying {
+                        self.speechManager.pauseSpeaking()
+                    }
+                }
+            
+            // 获取可用的语音
+            self.availableVoices = AVSpeechSynthesisVoice.speechVoices()
+            print("获取到 \(self.availableVoices.count) 个可用语音")
+            
+            // 安全检查：强制重置之前可能存在的播放状态
+            if !isAppLaunch && speechManager.getSynthesizerStatus() {
+                print("检测到合成器正在播放，但这是一个新的ArticleReaderView实例，强制重置...")
+                speechManager.stopSpeaking(resetResumeState: true)
             }
             
-            // 检查是否短时间内重复调用
-            let now = Date()
-            if now.timeIntervalSince(AppearState.lastAppearTime) < 0.5 && AppearState.isInitializing {
-                print("短时间内重复进入onAppear，跳过初始化")
-                print("==============================================")
-                return
+            // 设置播放列表
+            if useLastPlaylist {
+                print("使用上次播放列表，包含 \(speechManager.lastPlayedArticles.count) 篇文章")
+            } else {
+                // 根据所在列表设置播放上下文
+                let articlesToPlay = listArticles
+                print("设置播放列表为当前文章所在列表，包含 \(articlesToPlay.count) 篇文章")
+                speechManager.updatePlaylist(articlesToPlay)
+                
+                // 更新当前文章的播放列表到最近的列表
+                speechManager.lastPlayedArticles = articlesToPlay
             }
-            
-            AppearState.lastAppearTime = now
-            AppearState.isInitializing = true
             
             // 初始化语音管理器
             speechManager.setup(for: article)
             
-            // 加载文章列表
-            articleManager.loadArticles()
+            // 强制立即刷新进度条和高亮状态
+            if speechManager.isResuming {
+                print("立即刷新进度条：位置 \(speechManager.currentPlaybackPosition), 进度: \(Int(speechManager.currentProgress * 100))%")
+                
+                // 使用SpeechManager的forceUpdateUI方法强制更新UI
+                speechManager.forceUpdateUI()
+            }
+            
+            // 优先检查合成器的实际状态 - 这是最可靠的
+            let actualSpeakingState = SpeechManager.shared.getSynthesizerStatus()
+            print("合成器当前状态检查 - 是否在朗读: \(actualSpeakingState)")
+            
+            if actualSpeakingState {
+                // 如果合成器实际在朗读，则强制UI显示为播放状态
+                if !speechManager.isPlaying {
+                    print("检测到合成器正在朗读，强制更新UI为播放状态")
+                    speechManager.isPlaying = true
+                    speechManager.objectWillChange.send()
+                }
+            } else {
+                // 尝试通过文章ID进行次级检查
+                let isCurrentArticlePlaying = speechManager.isArticlePlaying(articleId: article.id)
+                print("检查文章播放状态 - 文章ID: \(article.id), 是否在播放: \(isCurrentArticlePlaying)")
+                
+                // 如果文章正在播放中，但界面没有显示播放状态，强制更新界面状态
+                if isCurrentArticlePlaying && !speechManager.isPlaying {
+                    print("发现不同步状态：文章正在播放但UI显示为暂停状态，正在修复...")
+                    speechManager.isPlaying = true
+                    speechManager.objectWillChange.send()
+                }
+            }
+            
+            // 完整检查并同步播放状态，确保UI与合成器状态一致
+            checkAndSyncPlaybackState()
+            
+            // 不需要重新加载文章列表，使用当前已有的数据
+            // articleManager.loadArticles() - 移除这行以避免重复加载
             
             // 通知已进入播放界面
             NotificationCenter.default.post(name: Notification.Name("EnterPlaybackView"), object: nil)
@@ -495,143 +574,23 @@ struct ArticleReaderView: View {
             // 保存最近播放的文章ID
             UserDefaults.standard.set(article.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
             
-            // 设置播放列表
-            let isUsingLastPlaylist = UserDefaults.standard.bool(forKey: "isUsingLastPlaylist")
-            if ((useLastPlaylist || isUsingLastPlaylist) && !speechManager.lastPlayedArticles.isEmpty) {
-                // 如果需要使用上一次的播放列表，且播放列表不为空
-                print("使用上一次的播放列表")
-                currentListArticles = speechManager.lastPlayedArticles
-            } else {
-                // 否则使用当前列表，检查SpeechManager是否已有播放列表
-                if !useLastPlaylist && !isUsingLastPlaylist && !speechManager.lastPlayedArticles.isEmpty 
-                   && speechManager.lastPlayedArticles.contains(where: { $0.id == article.id }) {
-                    // 如果当前文章在已有播放列表中，且不是来自上次播放列表的请求，则使用SpeechManager中的播放列表
-                    print("保留SpeechManager中已有的播放列表")
-                    currentListArticles = speechManager.lastPlayedArticles
-                } else {
-                    // 使用从列表计算得到的播放列表
-                    print("使用当前列表计算的播放列表")
-                    currentListArticles = listArticles
-                }
-            }
-            print("设置当前播放列表: \(currentListArticles.count)篇文章")
-            
-            // 更新speechManager中的播放列表
-            speechManager.updatePlaylist(currentListArticles)
-            print("更新SpeechManager播放列表完成")
-            
-            // 监听播放下一篇文章的通知
-            playNextSubscription = NotificationCenter.default.publisher(for: Notification.Name("PlayNextArticle"))
-                .receive(on: RunLoop.main)
-                .sink { _ in
-                    print("收到PlayNextArticle通知，准备播放下一篇")
-                    
-                    // 防止重复快速处理
-                    let now = Date()
-                    if now.timeIntervalSince(ArticleReaderView.lastPlayNextTime) < 2.0 {
-                        print("两次PlayNextArticle触发间隔太短，忽略此次请求")
-                        return
-                    }
-                    ArticleReaderView.lastPlayNextTime = now
-                    
-                    // 特殊处理：列表中只有一篇文章的情况
-                    if self.currentListArticles.count == 1 && self.speechManager.playbackMode == .listRepeat {
-                        print("列表中只有一篇文章，直接从头开始播放当前文章")
-                        
-                        // 停止当前所有播放
-                        self.speechManager.stopSpeaking(resetResumeState: true)
-                        
-                        // 延迟加长到2秒，确保之前的播放状态完全重置
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            // 确保语音代理状态已完全重置
-                            self.speechDelegate.startPosition = 0
-                            self.speechDelegate.wasManuallyPaused = false
-                            // 使用公共方法重置播放标志
-                            self.speechManager.resetPlaybackFlags()
-                            
-                            // 从头开始播放
-                            self.speechManager.startSpeaking()
-                            print("重新开始播放唯一文章")
-                        }
-                    } else {
-                        // 有多篇文章，正常处理下一篇
-                        self.playNextArticle()
-                    }
-                }
-            
-            // 检查是否是从列表循环模式导航而来
-            let isFromListRepeat = UserDefaults.standard.bool(forKey: UserDefaultsKeys.isFromListRepeat)
-            
-            // 获取是否是通过浮动球进入
-            let isFromFloatingBall = UserDefaults.standard.bool(forKey: "isFromFloatingBall")
-            
-            print("是否从列表循环跳转而来: \(isFromListRepeat)")
-            print("是否从浮动球进入: \(isFromFloatingBall)")
-            
-            // 只有在从列表循环模式导航且非浮动球进入时才自动播放
-            if isFromListRepeat && speechManager.playbackMode == .listRepeat && !isFromFloatingBall {
-                print("检测到是从列表循环跳转而来，准备自动开始播放")
-                // 重置标记
-                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.isFromListRepeat)
-                
-                // 增加延迟时间到1.2秒，确保视图已完全加载且前一个播放已完全停止
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    // 确保重置所有状态标志
-                    self.speechDelegate.startPosition = 0
-                    self.speechDelegate.wasManuallyPaused = false
-                    // 使用公共方法重置播放标志
-                    self.speechManager.resetPlaybackFlags()
-                    
-                    print("开始自动播放")
-                    // 确保从头开始播放
-                    self.speechManager.startSpeaking()
-                }
-            }
-            
-            // 重置浮动球标记
-            if isFromFloatingBall {
-                UserDefaults.standard.set(false, forKey: "isFromFloatingBall")
-            }
-            
-            // 打印列表循环状态
-            if currentListArticles.count == 1 {
-                print("⚠️ 注意：列表中只有一篇文章，列表循环将重新播放同一篇文章")
-            }
-            
-            // 监听定时器完成通知
-            timerCompletedSubscription = NotificationCenter.default.publisher(for: Notification.Name("TimerCompleted"))
-                .receive(on: RunLoop.main)
-                .sink { _ in
-                    print("定时器完成，已停止播放")
-                }
-            
-            // 重置初始化标志，允许下次初始化
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                AppearState.isInitializing = false
-            }
-            
             print("==============================================")
         }
         .onDisappear {
+            // 恢复底部标签栏
+            showTabBar()
+            
             print("========= ArticleReaderView.onDisappear =========")
             
-            // 在页面消失时不要立即处理，而是延迟一段时间，防止短暂过渡导致的错误处理
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                // 仅当页面真的已经消失时（导航已完成）才发送通知
-                // 通知已离开播放界面
-                NotificationCenter.default.post(name: Notification.Name("ExitPlaybackView"), object: nil)
-                
-                // 重置使用上次播放列表的标志
-                UserDefaults.standard.set(false, forKey: "isUsingLastPlaylist")
-                
-                // 清理资源
-                self.speechManager.cleanup()
-            }
+            // 取消订阅
+            self.playNextSubscription?.cancel()
+            self.timerCompletedSubscription?.cancel()
             
-            // 取消通知订阅
-            playNextSubscription?.cancel()
-            timerCompletedSubscription?.cancel()
+            // 通知已离开播放界面
+            NotificationCenter.default.post(name: Notification.Name("ExitPlaybackView"), object: nil)
             
+            // 保存朗读进度
+            speechManager.savePlaybackProgress()
             print("==============================================")
         }
         .sheet(isPresented: $showSpeedSelector) {
@@ -666,7 +625,7 @@ struct ArticleReaderView: View {
                         
                         // 重置播放状态
                         speechDelegate.startPosition = 0
-                        speechDelegate.wasManuallyPaused = false
+                        speechDelegate.wasManuallyPaused = true  // 标记为手动切换
                         speechManager.resetPlaybackFlags()
                         
                         // 保存最近播放的文章ID
@@ -678,8 +637,13 @@ struct ArticleReaderView: View {
                         // 设置新文章到播放器
                         speechManager.setup(for: selectedArticle)
                         
+                        // 在setupArticleReader中增加清晰的日志记录
+                        print("列表选择章节：手动切换到新章节：\(selectedArticle.title)")
+                        
                         // 稍后开始播放
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            // 再次确保手动切换标识被正确设置
+                            self.speechDelegate.wasManuallyPaused = true
                             self.speechManager.startSpeaking()
                         }
                     }
@@ -711,6 +675,20 @@ struct ArticleReaderView: View {
             let languageName = languageNames[articleLanguage] ?? articleLanguage
             Text("请选择\(languageName)主播朗读\(languageName)文章")
         }
+    }
+    
+    // 隐藏底部标签栏 - 适配全屏展示模式
+    private func hideTabBar() {
+        // 在全屏展示中不需要隐藏标签栏，因为标签栏已经由系统隐藏
+        // 但保留方法以兼容之前的实现
+        print("进入播放界面，标签栏由全屏模式自动隐藏")
+    }
+    
+    // 显示底部标签栏 - 适配全屏展示模式
+    private func showTabBar() {
+        // 在全屏展示中不需要显示标签栏，返回后会自动显示
+        // 但保留方法以兼容之前的实现
+        print("离开播放界面，标签栏由全屏模式自动显示")
     }
     
     // 处理文本点击事件
@@ -834,6 +812,41 @@ struct ArticleReaderView: View {
         return isCompatible
     }
     
+    // 检查并同步播放状态 - 解决在播放过程中再次打开相同文档时状态不同步问题
+    private func checkAndSyncPlaybackState() {
+        print("开始检查并同步播放状态...")
+        
+        // 获取AVSpeechSynthesizer实例当前是否在朗读
+        let isSpeaking = SpeechManager.shared.getSynthesizerStatus()
+        print("合成器状态检查 - 是否在朗读: \(isSpeaking)，UI显示状态: \(speechManager.isPlaying)")
+        
+        // 如果合成器在朗读但界面显示为暂停，更新界面状态
+        if isSpeaking && !speechManager.isPlaying {
+            print("检测到状态不同步：合成器正在朗读但UI显示为暂停状态，正在修复...")
+            
+            // 直接修改UI状态为播放中，不使用异步，确保立即生效
+            speechManager.isPlaying = true
+            
+            // 强制UI进行刷新
+            speechManager.objectWillChange.send()
+            print("已将UI状态更新为播放中")
+        }
+        // 如果合成器不在朗读但界面显示为播放中，更新界面状态
+        else if !isSpeaking && speechManager.isPlaying {
+            print("检测到状态不同步：合成器已停止但UI显示为播放状态，正在修复...")
+            
+            // 直接修改UI状态为暂停，不使用异步，确保立即生效
+            speechManager.isPlaying = false
+            
+            // 强制UI进行刷新
+            speechManager.objectWillChange.send()
+            print("已将UI状态更新为暂停")
+        }
+        else {
+            print("播放状态已同步，无需修复")
+        }
+    }
+    
     // 播放下一篇文章
     private func playNextArticle() {
         print("========= ArticleReaderView.playNextArticle =========")
@@ -954,51 +967,6 @@ struct ArticleReaderView: View {
         print("=================================================")
     }
     
-    private func handlePlayNextArticle() {
-        print("========= handlePlayNextArticle =========")
-        // 获取当前文章的索引
-        if let currentIndex = currentListArticles.firstIndex(where: { $0.id == article.id }) {
-            // 计算下一篇文章的索引（循环处理）
-            let nextIndex = (currentIndex + 1) % currentListArticles.count
-            
-            // 获取下一篇要播放的文章
-            let nextArticle = currentListArticles[nextIndex]
-            
-            // 保存最近播放的文章ID
-            UserDefaults.standard.set(nextArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
-            
-            // 更新当前文章
-            article = nextArticle
-            
-            // 设置新文章到播放器
-            speechManager.setup(for: nextArticle)
-            
-            // 开始播放
-            speechManager.startSpeaking()
-            
-            print("已切换到下一篇文章: \(nextArticle.title)")
-        } else if !currentListArticles.isEmpty {
-            // 如果当前文章不在列表中，播放列表的第一篇
-            let firstArticle = currentListArticles[0]
-            
-            // 保存最近播放的文章ID
-            UserDefaults.standard.set(firstArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
-            
-            // 更新当前文章
-            article = firstArticle
-            
-            // 设置新文章到播放器
-            speechManager.setup(for: firstArticle)
-            
-            // 开始播放
-            speechManager.startSpeaking()
-            
-            print("文章不在列表中，已切换到第一篇: \(firstArticle.title)")
-        } else {
-            print("列表中没有文章可播放")
-        }
-    }
-    
     // 播放上一篇文章
     private func playPreviousArticle() {
         print("========= ArticleReaderView.playPreviousArticle =========")
@@ -1117,13 +1085,5 @@ struct ArticleReaderView: View {
         }
         
         print("=================================================")
-    }
-    
-    private func handleFloatingButtonTap() {
-        // 使用上一次播放的文章列表
-        if !speechManager.lastPlayedArticles.isEmpty {
-            currentListArticles = speechManager.lastPlayedArticles
-        }
-        showArticleList = true
     }
 } 

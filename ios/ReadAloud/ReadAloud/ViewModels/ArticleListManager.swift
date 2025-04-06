@@ -3,13 +3,17 @@ import SwiftUI
 
 /// 管理文章列表分类的类
 class ArticleListManager: ObservableObject {
+    // 单例实例
+    static let shared = ArticleListManager()
+    
     @Published var lists: [ArticleList] = []
     @Published var selectedListId: UUID? = nil
     
     private let saveKey = "savedArticleLists"
     private let selectedListKey = "selectedArticleList"
     
-    init() {
+    // 私有初始化方法
+    private init() {
         loadLists()
         // 如果没有列表，创建一个默认的"所有文章"列表
         if lists.isEmpty {

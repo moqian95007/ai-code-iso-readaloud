@@ -3,10 +3,14 @@ import SwiftUI
 
 // 管理文章数据的类
 class ArticleManager: ObservableObject {
+    // 单例模式，确保全局只有一个文章管理器实例
+    static let shared = ArticleManager()
+    
     @Published var articles: [Article] = []
     private let saveKey = "savedArticles"
     
-    init() {
+    // 私有初始化方法，防止外部直接创建实例
+    private init() {
         loadArticles()
     }
     

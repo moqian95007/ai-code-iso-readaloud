@@ -57,6 +57,78 @@ class SpeechManager: ObservableObject {
         return currentText.count
     }
     
+    // 提供获取当前文本的方法
+    func getCurrentText() -> String {
+        return currentText
+    }
+    
+    // 检查指定ID的文章是否正在播放
+    func isArticlePlaying(articleId: UUID) -> Bool {
+        print("检查文章ID: \(articleId) 是否在播放")
+        
+        // 首先检查合成器是否在朗读
+        let isSynthesizerSpeaking = synthesizer.isSpeaking
+        
+        // 如果合成器不在朗读，快速返回false
+        if !isSynthesizerSpeaking {
+            print("合成器未在朗读，返回false")
+            return false
+        }
+        
+        // 检查是否有当前文章
+        guard let currentArticle = currentArticle else {
+            print("当前没有活跃的文章，返回false")
+            return false
+        }
+        
+        // 1. 首先检查UUID是否精确匹配
+        let isIdMatched = currentArticle.id == articleId
+        
+        // 2. 如果UUID不匹配，尝试通过章节号匹配
+        var isChapterMatched = false
+        
+        // 提取章节编号的匹配模式，如 "第13章"
+        let titlePattern = "第(\\d+)章"
+        
+        // 从当前播放中的文章标题中提取章节号
+        if let currentTitleMatch = currentArticle.title.range(of: titlePattern, options: .regularExpression) {
+            let currentTitleStr = currentArticle.title
+            let currentStartIndex = currentTitleStr.index(after: currentTitleMatch.lowerBound) // 跳过"第"字
+            let currentEndIndex = currentTitleStr.firstIndex(of: "章") ?? currentTitleStr.endIndex
+            
+            if currentStartIndex < currentEndIndex {
+                let currentChapterNumStr = String(currentTitleStr[currentStartIndex..<currentEndIndex])
+                
+                // 从文档库中寻找匹配的文章标题
+                for article in lastPlayedArticles {
+                    if article.id == articleId && article.title.contains("章") {
+                        if let articleTitleMatch = article.title.range(of: titlePattern, options: .regularExpression) {
+                            let articleTitleStr = article.title
+                            let articleStartIndex = articleTitleStr.index(after: articleTitleMatch.lowerBound)
+                            let articleEndIndex = articleTitleStr.firstIndex(of: "章") ?? articleTitleStr.endIndex
+                            
+                            if articleStartIndex < articleEndIndex {
+                                let articleChapterNumStr = String(articleTitleStr[articleStartIndex..<articleEndIndex])
+                                
+                                // 比较章节号
+                                if currentChapterNumStr == articleChapterNumStr {
+                                    isChapterMatched = true
+                                    print("章节号匹配成功: 当前章节号\(currentChapterNumStr) = 检查章节号\(articleChapterNumStr)")
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        print("当前文章ID: \(currentArticle.id), 检查ID: \(articleId), ID匹配: \(isIdMatched), 章节匹配: \(isChapterMatched), 合成器状态: \(isSynthesizerSpeaking)")
+        
+        // 返回是否在播放这篇文章（ID匹配或章节号匹配）
+        return (isIdMatched || isChapterMatched) && isSynthesizerSpeaking
+    }
+    
     // 计时器
     private var timer: Timer?
     
@@ -377,25 +449,46 @@ class SpeechManager: ObservableObject {
         
         // 重置播放状态
         isPlaying = false
-        isResuming = false
-        currentPlaybackPosition = 0
         currentProgress = 0.0
         currentTime = 0.0
         
         // 获取保存的播放位置
         if let articleId = currentArticle?.id {
-            currentPlaybackPosition = UserDefaults.standard.integer(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
-            currentProgress = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastProgress(for: articleId))
-            currentTime = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+            let savedPosition = UserDefaults.standard.integer(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+            let savedProgress = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastProgress(for: articleId))
+            let savedTime = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
             let wasPlaying = UserDefaults.standard.bool(forKey: UserDefaultsKeys.wasPlaying(for: articleId))
             
-            isResuming = currentPlaybackPosition > 0
-            
-            // 更新进度条和时间显示，但不自动开始播放
-            if isResuming {
-                currentProgress = Double(currentPlaybackPosition) / Double(currentText.count)
-                currentTime = totalTime * currentProgress
+            // 检查保存的位置是否有效且在文本范围内
+            if savedPosition > 0 && savedPosition < currentText.count {
+                currentPlaybackPosition = savedPosition
+                isResuming = true  // 设置为恢复状态，这样UI会显示"继续朗读"按钮
+                
+                // 更新进度条和时间显示
+                currentProgress = savedProgress > 0 ? savedProgress : Double(savedPosition) / Double(currentText.count)
+                currentTime = savedTime > 0 ? savedTime : totalTime * currentProgress
+                
+                // 强制更新UI状态
+                forceUpdateUI(position: savedPosition)
+                
+                print("恢复播放位置: \(savedPosition)/\(currentText.count), 进度: \(Int(currentProgress * 100))%")
+            } else {
+                // 如果没有有效的保存位置，重置位置
+                currentPlaybackPosition = 0
+                isResuming = false
+                
+                // 重置语音代理状态
+                speechDelegate.startPosition = 0
+                speechDelegate.highlightRange = NSRange(location: 0, length: 0)
             }
+        } else {
+            // 新文章，没有历史记录
+            currentPlaybackPosition = 0
+            isResuming = false
+            
+            // 重置语音代理状态
+            speechDelegate.startPosition = 0
+            speechDelegate.highlightRange = NSRange(location: 0, length: 0)
         }
     }
     
@@ -527,13 +620,20 @@ class SpeechManager: ObservableObject {
             stopTimer()
         }
         
+        // 安全检查：确保位置在有效范围内
+        let safePosition = max(0, min(position, currentText.count - 1))
+        if safePosition != position {
+            print("位置超出范围，调整为安全位置: \(safePosition)")
+        }
+        
         // 判断是否是从中间位置开始的新播放
-        let isResumeFromMiddle = position > 0 && position < currentText.count - 1
+        let isResumeFromMiddle = safePosition > 0 && safePosition < currentText.count - 1
         
         // 如果是从中间位置开始的播放（非开头非结尾），应该被视为用户操作，不应触发自动"下一篇"逻辑
-        if isResumeFromMiddle {
-            print("从中间位置开始播放，标记为用户操作")
-            // 不要重置wasManuallyPaused，以便在播放完成后能正确处理
+        if isResumeFromMiddle || isResuming {
+            print("从中间位置开始播放或恢复播放，标记为用户操作")
+            // 设置手动暂停标志，防止播放完成后自动跳转
+            speechDelegate.wasManuallyPaused = true
         } else {
             // 只有从头开始播放时才重置手动暂停标志
             speechDelegate.wasManuallyPaused = false
@@ -541,7 +641,10 @@ class SpeechManager: ObservableObject {
         }
         
         // 设置朗读起始位置
-        speechDelegate.startPosition = position
+        speechDelegate.startPosition = safePosition
+        
+        // 立即更新进度和高亮范围 - 使用工具方法确保一致性
+        forceUpdateUI(position: safePosition)
         
         if let articleId = currentArticle?.id {
             // 记录播放开始的时间戳
@@ -552,21 +655,11 @@ class SpeechManager: ObservableObject {
             UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
         }
         
-        // 安全检查：确保位置在有效范围内
-        let safePosition = max(0, min(position, currentText.count - 1))
-        if safePosition != position {
-            print("位置超出范围，调整为安全位置: \(safePosition)")
-        }
-        
         if safePosition >= currentText.count || currentText.isEmpty {
             print("位置无效或文本为空，从头开始播放")
             startSpeaking()
             return
         }
-        
-        // 更新进度和时间
-        currentProgress = Double(safePosition) / Double(currentText.count)
-        currentTime = totalTime * currentProgress
         
         // 获取从指定位置开始的子字符串
         let startIndex = currentText.index(currentText.startIndex, offsetBy: safePosition)
@@ -595,6 +688,9 @@ class SpeechManager: ObservableObject {
                 // 确保正确设置标志
                 speechDelegate.wasManuallyPaused = false
                 
+                // 立即更新进度和高亮范围
+                forceUpdateUI(position: 0)
+                
                 // 从头开始播放
                 startSpeaking()
                 return
@@ -611,6 +707,9 @@ class SpeechManager: ObservableObject {
                     // 重置起始位置
                     speechDelegate.startPosition = 0
                     speechDelegate.wasManuallyPaused = false
+                    
+                    // 立即更新进度和高亮范围
+                    forceUpdateUI(position: 0)
                     
                     // 延迟发送通知，确保UI有时间更新
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -744,122 +843,51 @@ class SpeechManager: ObservableObject {
         }
     }
     
-    // 跳转到指定进度
+    // 跳转到指定进度位置
     func seekToProgress(_ progress: Double) {
-        print("========= 跳转到指定进度 =========")
-        print("指定进度: \(progress)")
-        print("文本总长度: \(currentText.count)")
+        print("========= 跳转到进度位置 =========")
         
-        // 如果文本为空，不进行操作
-        if currentText.isEmpty {
-            print("文本为空，无法跳转")
-            return
-        }
+        // 确保进度值在有效范围内
+        let clampedProgress = max(0, min(1, progress))
+        print("目标进度: \(Int(clampedProgress * 100))%")
         
-        // 计算新位置
-        let newPosition = Int(Double(currentText.count) * progress)
+        // 计算对应的字符位置
+        let targetPosition = Int(clampedProgress * Double(currentText.count))
+        print("计算的目标位置: \(targetPosition)/\(currentText.count)")
         
-        // 确保位置在有效范围内
-        let safePosition = max(0, min(newPosition, currentText.count - 1))
+        // 更新当前位置和进度
+        currentPlaybackPosition = targetPosition
         
-        print("计算的新位置: \(safePosition)")
+        // 立即更新UI显示，确保一致性
+        forceUpdateUI(position: targetPosition)
         
-        // 检查是否跳转到文章末尾
-        let isNearEnd = safePosition >= currentText.count - 10 // 如果只剩下10个字符，视为接近末尾
-        let isFromBeginning = safePosition <= 10 // 如果在开头10个字符内
-        
-        if isNearEnd && (playbackMode == .singleRepeat || playbackMode == .listRepeat) {
-            print("已接近文章末尾，根据播放模式决定操作")
-            
-            // 在循环模式下且接近末尾时，直接触发结束处理
-            if playbackMode == .singleRepeat {
-                print("单篇循环模式：直接重置到开头")
-                // 从头开始播放当前文章
-                currentPlaybackPosition = 0
-                currentProgress = 0.0
-                currentTime = 0.0
-                
-                if isPlaying {
-                    // 确保完全停止当前播放
-                    stopSpeaking(resetResumeState: true)
-                    
-                    // 延迟一点再开始播放，确保之前的停止已经完成
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // 重置标志，防止在新播放中错误地识别为手动暂停
-                        self.speechDelegate.wasManuallyPaused = false
-                        self.speechDelegate.startPosition = 0
-                        
-                        // 从头开始播放
-                        self.startSpeaking()
-                    }
-                } else {
-                    // 不在播放状态，只重置位置
-                    savePlaybackProgress()
-                }
-                return
-            } else if playbackMode == .listRepeat {
-                print("列表循环模式：准备播放下一篇文章")
-                
-                if isPlaying {
-                    // 确保完全停止当前播放
-                    stopSpeaking(resetResumeState: true)
-                    
-                    // 延迟发送播放下一篇通知
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // 重置标志
-                        self.speechDelegate.wasManuallyPaused = false
-                        self.isProcessingNextArticle = true
-                        
-                        // 发送通知请求播放下一篇
-                        NotificationCenter.default.post(
-                            name: Notification.Name("PlayNextArticle"),
-                            object: nil
-                        )
-                        
-                        // 延迟重置标志
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.isProcessingNextArticle = false
-                        }
-                    }
-                }
-                return
-            }
-        }
-        
-        // 中间位置的跳转应该被标记为手动操作，防止触发自动循环
-        // 只有跳转到开头时才设置为自然结束标记
-        if !isFromBeginning {
-            speechDelegate.wasManuallyPaused = true
-            print("跳转到中间位置，标记为手动操作")
-        } else {
-            speechDelegate.wasManuallyPaused = false
-            print("跳转到开头，标记为自然播放")
-        }
-        
-        // 根据播放状态决定是立即跳转还是只更新位置
+        // 如果正在播放，停止当前播放并从新位置开始
         if isPlaying {
-            // 停止当前播放但不重置恢复状态
-            stopSpeaking(resetResumeState: false)
+            // 确保标记手动操作
+            speechDelegate.wasManuallyPaused = true
             
-            // 延迟一点再开始播放，确保之前的停止已经完成
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                print("从新位置开始播放")
-                // 确保设置正确的标志，防止从中间位置播放结束后自动循环
-                self.speechDelegate.wasManuallyPaused = true
-                self.startSpeakingFromPosition(safePosition)
-            }
+            // 从新位置开始播放
+            startSpeakingFromPosition(targetPosition)
         } else {
-            currentPlaybackPosition = safePosition
-            isResuming = true
-            currentProgress = progress
-            currentTime = totalTime * progress
+            // 如果不在播放，仅更新位置和UI显示，但不开始播放
+            // 设置语音代理的起始位置
+            speechDelegate.startPosition = targetPosition
             
-            // 保存更新后的播放进度
-            savePlaybackProgress()
-            print("只更新位置，不开始播放")
+            // 保存播放位置，以便下次点击"继续上次播放"时从此位置开始
+            if let articleId = currentArticle?.id {
+                UserDefaults.standard.set(targetPosition, forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+                UserDefaults.standard.set(clampedProgress, forKey: UserDefaultsKeys.lastProgress(for: articleId))
+                UserDefaults.standard.set(currentTime, forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+            }
         }
         
-        print("=====================================")
+        // 设置恢复状态为true，表示有保存的播放位置
+        if targetPosition > 0 {
+            isResuming = true
+        }
+        
+        print("成功跳转到新位置并更新UI")
+        print("=======================================")
     }
     
     // 后退指定秒数
@@ -1297,5 +1325,74 @@ class SpeechManager: ObservableObject {
     // 重置播放标志，供外部调用
     func resetPlaybackFlags() {
         isProcessingNextArticle = false
+    }
+    
+    // 获取当前正在播放的文章
+    func getCurrentArticle() -> Article? {
+        if let article = currentArticle {
+            print("SpeechManager.getCurrentArticle: 返回当前文章: \(article.title), ID: \(article.id)")
+            return article
+        } else if !lastPlayedArticles.isEmpty {
+            print("SpeechManager.getCurrentArticle: 当前文章为nil，返回播放列表中的第一篇文章")
+            return lastPlayedArticles.first
+        }
+        print("SpeechManager.getCurrentArticle: 没有可用的文章")
+        return nil
+    }
+    
+    // 强制更新UI状态（进度条和高亮）- 供外部调用
+    func forceUpdateUI(position: Int? = nil) {
+        // 确保在主线程执行UI更新
+        DispatchQueue.main.async {
+            // 获取要更新的位置
+            let updatePosition = position ?? self.currentPlaybackPosition
+            
+            // 只有在有效文本长度内才更新
+            if self.currentText.count > 0 && updatePosition >= 0 && updatePosition < self.currentText.count {
+                // 计算正确的进度
+                let progress = Double(updatePosition) / Double(self.currentText.count)
+                
+                // 更新进度相关属性
+                self.currentProgress = progress
+                self.currentTime = self.totalTime * progress
+                
+                // 更新语音代理状态
+                self.speechDelegate.startPosition = updatePosition
+                self.speechDelegate.highlightRange = NSRange(location: updatePosition, length: 0)
+                
+                // 更新锁屏信息
+                self.updateNowPlayingInfo()
+                
+                // 强制UI更新
+                self.objectWillChange.send()
+                
+                print("强制更新UI - 位置: \(updatePosition)/\(self.currentText.count), 进度: \(Int(progress * 100))%")
+            } else if updatePosition > 0 {
+                print("警告: 无法更新UI，位置 \(updatePosition) 超出文本范围 0-\(self.currentText.count)")
+            }
+        }
+    }
+    
+    // 获取合成器当前状态
+    func getSynthesizerStatus() -> Bool {
+        let isSpeaking = synthesizer.isSpeaking
+        
+        // 添加更多日志信息
+        if let currentArticle = currentArticle {
+            print("获取合成器状态 - 是否正在朗读: \(isSpeaking), 当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+        } else {
+            print("获取合成器状态 - 是否正在朗读: \(isSpeaking), 没有当前文章")
+        }
+        
+        // 如果合成器正在朗读，但UI状态不同步，记录额外信息帮助调试
+        if isSpeaking && !isPlaying {
+            if let currentArticle = currentArticle {
+                print("状态不一致 - 合成器正在朗读但UI显示为暂停，当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+            } else {
+                print("状态不一致 - 合成器正在朗读但UI显示为暂停，且没有当前文章")
+            }
+        }
+        
+        return isSpeaking
     }
 }
