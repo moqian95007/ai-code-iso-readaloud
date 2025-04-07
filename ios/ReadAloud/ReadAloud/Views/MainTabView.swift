@@ -14,16 +14,22 @@ struct MainTabView: View {
     @State private var isNavigating = false
     
     // 所需的管理器
-    @ObservedObject private var articleManager = ArticleManager.shared
+    @StateObject private var articleManager: ArticleManager
     @ObservedObject private var listManager = ArticleListManager.shared
     @StateObject private var speechManager = SpeechManager.shared
+    
+    // 初始化方法
+    init() {
+        // 创建 ArticleManager 实例
+        self._articleManager = StateObject(wrappedValue: ArticleManager())
+    }
     
     // MARK: - 视图主体
     var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
                 // 文件朗读页面作为首页
-                FileReadView()
+                FileReadView(articleManager: articleManager)
                 .tabItem {
                     VStack {
                         Image(systemName: "house.fill")
@@ -34,7 +40,7 @@ struct MainTabView: View {
                 
                 // 文章列表页面
                 NavigationView {
-                    ArticleListView()
+                    ArticleListView(articleManager: articleManager)
                 }
                 .navigationViewStyle(StackNavigationViewStyle())
                 .tabItem {
@@ -90,7 +96,8 @@ struct MainTabView: View {
                     ArticleReaderView(
                         article: article,
                         selectedListId: selectedListId,
-                        useLastPlaylist: shouldUseLastPlaylist
+                        useLastPlaylist: shouldUseLastPlaylist,
+                        articleManager: articleManager
                     )
                 }
                 .id(article.id) // 使用文章ID作为视图的ID，确保在文章变化时视图会刷新

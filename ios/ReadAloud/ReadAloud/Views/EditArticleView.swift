@@ -25,7 +25,10 @@ struct EditArticleView: View {
         return firstLine.isEmpty ? "新文章" : firstLine
     }
     
-    init(articleManager: ArticleManager, listManager: ArticleListManager, article: Article, isPresented: Binding<Article?>) {
+    init(articleManager: ArticleManager,
+         listManager: ArticleListManager = ArticleListManager.shared,
+         article: Article,
+         isPresented: Binding<Article?>) {
         self.articleManager = articleManager
         self.listManager = listManager
         self.article = article
@@ -73,8 +76,13 @@ struct EditArticleView: View {
                 },
                 trailing: Button("保存") {
                     if !content.isEmpty {
-                        // 更新文章内容和标题
-                        articleManager.updateArticle(id: article.id, title: extractedTitle, content: content)
+                        // 创建更新后的文章对象
+                        var updatedArticle = article
+                        updatedArticle.title = extractedTitle
+                        updatedArticle.content = content
+                        
+                        // 更新文章
+                        articleManager.updateArticle(updatedArticle)
                         isPresented = nil
                     }
                 }

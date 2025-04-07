@@ -34,7 +34,13 @@ struct EditListsView: View {
                 .onDelete { indexSet in
                     // 防止删除第一个列表（"所有文章"）
                     if !indexSet.contains(0) {
-                        listManager.deleteList(at: indexSet)
+                        // 对于每个索引，删除对应的列表ID
+                        for index in indexSet {
+                            if index < listManager.userLists.count {
+                                let listId = listManager.userLists[index].id
+                                listManager.deleteList(id: listId)
+                            }
+                        }
                     }
                 }
             }
@@ -60,7 +66,15 @@ struct EditListsView: View {
                     isPresented: $showingRenameSheet,
                     onSave: {
                         if let id = editingListId, !editingListName.isEmpty {
-                            listManager.updateList(id: id, name: editingListName)
+                            // 获取当前列表
+                            if let currentList = listManager.findList(by: id) {
+                                // 创建更新后的列表
+                                var updatedList = currentList
+                                updatedList.name = editingListName
+                                
+                                // 更新列表
+                                listManager.updateList(updatedList)
+                            }
                         }
                     }
                 )

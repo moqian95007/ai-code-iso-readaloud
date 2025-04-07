@@ -25,6 +25,9 @@ struct ReadAloudApp: App {
     // 添加PlaybackManager实例，用于全局播放状态管理
     @ObservedObject private var playbackManager = PlaybackManager.shared
     
+    // 添加 ArticleManager 实例
+    @StateObject private var articleManager = ArticleManager()
+    
     // 初始化，设置后台音频播放
     init() {
         setupBackgroundAudio()
@@ -71,7 +74,8 @@ struct ReadAloudApp: App {
                 if !isInPlaybackView {
                     FloatingBallView(
                         isVisible: $floatingBallManager.isVisible,
-                        position: $floatingBallManager.position
+                        position: $floatingBallManager.position,
+                        articleManager: articleManager
                     )
                     .ignoresSafeArea()
                 }

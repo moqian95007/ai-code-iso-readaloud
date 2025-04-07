@@ -1,7 +1,7 @@
 import Foundation
 
 /// 章节模型，用于存储识别出的文档章节
-struct Chapter: Identifiable, Codable, Equatable {
+struct Chapter: Identifiable, Codable, Equatable, TextContent {
     var id = UUID()
     var title: String // 章节标题，例如 "第一章 初见"
     var content: String // 章节内容
@@ -92,12 +92,5 @@ struct Chapter: Identifiable, Codable, Equatable {
         return result == 0 ? 1 : result // 如果解析失败，默认返回1
     }
     
-    // 获取内容预览，与Article保持一致
-    func contentPreview() -> String {
-        if content.count > 50 {
-            return String(content.prefix(50)) + "..."
-        } else {
-            return content
-        }
-    }
+    // 内容预览方法已移至 TextContent 协议实现
 } 

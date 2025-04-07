@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct ArticleListView: View {
-    @ObservedObject private var articleManager = ArticleManager.shared
-    @ObservedObject private var listManager = ArticleListManager.shared
-    @StateObject private var speechManager = SpeechManager.shared
+    @StateObject private var articleManager: ArticleManager
+    @StateObject private var listManager: ArticleListManager
+    @StateObject private var speechManager: SpeechManager
     @State private var showingAddSheet = false
     @State private var editingArticle: Article? = nil
     @State private var navigationLinkTag: UUID? = nil
@@ -22,6 +22,14 @@ struct ArticleListView: View {
     @State private var isNavigatingFromBall = false
     // 添加一个防止重复导航的标志
     @State private var isNavigating = false
+    
+    init(articleManager: ArticleManager = ArticleManager(),
+         listManager: ArticleListManager = ArticleListManager.shared,
+         speechManager: SpeechManager = SpeechManager.shared) {
+        _articleManager = StateObject(wrappedValue: articleManager)
+        _listManager = StateObject(wrappedValue: listManager)
+        _speechManager = StateObject(wrappedValue: speechManager)
+    }
     
     var body: some View {
         Group {
@@ -80,7 +88,8 @@ struct ArticleListView: View {
                     ArticleReaderView(
                         article: article,
                         selectedListId: listManager.selectedListId,
-                        useLastPlaylist: shouldUseLastPlaylist
+                        useLastPlaylist: shouldUseLastPlaylist,
+                        articleManager: articleManager
                     )
                 }
                 .background(Color(.systemBackground))

@@ -11,12 +11,15 @@ struct FileReadView: View {
     @State private var showDocumentReader = false // 是否显示阅读器
     
     // 必要的管理器
-    @ObservedObject private var articleManager = ArticleManager.shared // 使用单例
+    @ObservedObject private var articleManager: ArticleManager // 移除单例引用
     @ObservedObject private var documentLibrary = DocumentLibraryManager.shared // 使用单例
     @StateObject private var documentManager: DocumentManager // 文档导入管理器
     
     // 初始化
-    init() {
+    init(articleManager: ArticleManager) {
+        // 注入 ArticleManager
+        self.articleManager = articleManager
+        
         // 使用 DocumentLibraryManager 的共享实例
         let library = DocumentLibraryManager.shared
         self._documentManager = StateObject(wrappedValue: DocumentManager(documentLibrary: library))
@@ -101,7 +104,8 @@ struct FileReadView: View {
                 DocumentReaderView(
                     selectedDocument: $selectedDocument,
                     showDocumentReader: $showDocumentReader,
-                    documentLibrary: documentLibrary
+                    documentLibrary: documentLibrary,
+                    articleManager: articleManager
                 )
             }
             // 添加对OpenDocument通知的监听
@@ -563,6 +567,7 @@ struct DocumentReaderView: View {
     @Binding var selectedDocument: Document?
     @Binding var showDocumentReader: Bool
     let documentLibrary: DocumentLibraryManager
+    let articleManager: ArticleManager
     @State private var isLoading = true
     @State private var showContent = false
     
@@ -665,7 +670,8 @@ struct DocumentReaderView: View {
                             DocumentArticleReaderView(
                                 document: document, 
                                 isLoading: $isLoading,
-                                documentLibrary: documentLibrary
+                                documentLibrary: documentLibrary,
+                                articleManager: articleManager
                             )
                         }
                     }
@@ -803,12 +809,14 @@ struct DocumentArticleReaderView: View {
     @State private var isFirstLoad = true
     @State private var hasLoadedChapters = false
     @Binding var isLoading: Bool
+    let articleManager: ArticleManager
     
-    init(document: Document, isLoading: Binding<Bool>, documentLibrary: DocumentLibraryManager) {
+    init(document: Document, isLoading: Binding<Bool>, documentLibrary: DocumentLibraryManager, articleManager: ArticleManager) {
         print("DocumentArticleReaderView 初始化: \(document.title), 内容长度: \(document.content.count)")
         self.document = document
         self._isLoading = isLoading
         self.documentLibrary = documentLibrary
+        self.articleManager = articleManager
         
         // 确保文档内容有效
         let content = document.content.isEmpty ? "(文档内容为空，请重新导入)" : document.content
@@ -889,21 +897,24 @@ struct DocumentArticleReaderView: View {
     var body: some View {
         VStack {
             // 使用ArticleReaderView显示文档内容
-            ArticleReaderView(article: currentArticle)
-                .onAppear {
-                    print("DocumentArticleReaderView 出现")
-                    // 检查文档内容是否为空
-                    if document.content.isEmpty {
-                        print("警告: 文档内容为空，无法继续处理")
-                        isLoading = false
-                        return
-                    }
-                    
-                    // 预加载章节 - 增加延迟确保界面先显示
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        preloadChapters()
-                    }
+            ArticleReaderView(
+                article: currentArticle,
+                articleManager: articleManager
+            )
+            .onAppear {
+                print("DocumentArticleReaderView 出现")
+                // 检查文档内容是否为空
+                if document.content.isEmpty {
+                    print("警告: 文档内容为空，无法继续处理")
+                    isLoading = false
+                    return
                 }
+                
+                // 预加载章节 - 增加延迟确保界面先显示
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    preloadChapters()
+                }
+            }
         }
         // 处理章节变化
         .onReceive(chapterManager.$chapters) { chapters in
@@ -1444,6 +1455,6 @@ struct DocumentArticleReaderView: View {
 
 struct FileReadView_Previews: PreviewProvider {
     static var previews: some View {
-        FileReadView()
+        FileReadView(articleManager: ArticleManager())
     }
 } 

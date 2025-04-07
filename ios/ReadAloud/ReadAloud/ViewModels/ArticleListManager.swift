@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// 管理文章列表分类的类
-class ArticleListManager: ObservableObject {
+class ArticleListManager: ObservableObject, ArticleListManaging {
     // 单例实例
     static let shared = ArticleListManager()
     
@@ -22,7 +22,7 @@ class ArticleListManager: ObservableObject {
         loadLists()
         // 如果没有列表，创建一个默认的"所有文章"列表
         if userLists.isEmpty {
-            addList(name: "所有文章")
+            _ = addList(name: "所有文章", createdAt: Date())
         }
         
         // 加载上次选择的列表
@@ -66,8 +66,8 @@ class ArticleListManager: ObservableObject {
     }
     
     // 添加新列表
-    func addList(name: String) {
-        let newList = ArticleList(name: name)
+    func addList(name: String, createdAt: Date = Date()) -> ArticleList {
+        let newList = ArticleList(id: UUID(), name: name, createdAt: createdAt, articleIds: [], isDocument: false)
         lists.append(newList)
         
         // 如果这是第一个用户列表，自动选择它
@@ -76,42 +76,40 @@ class ArticleListManager: ObservableObject {
         }
         
         saveLists()
+        return newList
     }
     
     // 更新列表
-    func updateList(id: UUID, name: String) {
-        if let index = lists.firstIndex(where: { $0.id == id }) {
-            lists[index].name = name
+    func updateList(_ list: ArticleList) {
+        if let index = lists.firstIndex(where: { $0.id == list.id }) {
+            lists[index] = list
             saveLists()
         }
     }
     
     // 删除列表
-    func deleteList(at indexSet: IndexSet) {
-        // 将indexSet转换为用户列表的索引
-        let userListIndexes = indexSet.map { userLists[$0] }
-        
+    func deleteList(id: UUID) {
         // 防止删除最后一个用户列表
         if userLists.count <= 1 {
             return
         }
         
-        // 获取要删除的ID
-        let idsToDelete = userListIndexes.map { $0.id }
-        
         // 从完整列表中移除
-        for id in idsToDelete {
-            if let index = lists.firstIndex(where: { $0.id == id }) {
-                lists.remove(at: index)
-            }
+        if let index = lists.firstIndex(where: { $0.id == id }) {
+            lists.remove(at: index)
         }
         
         // 如果删除了当前选中的列表，切换到第一个用户列表
-        if let selectedId = selectedListId, idsToDelete.contains(selectedId) {
+        if selectedListId == id {
             selectedListId = userLists.first?.id
         }
         
         saveLists()
+    }
+    
+    // 根据ID查找列表
+    func findList(by id: UUID) -> ArticleList? {
+        return lists.first { $0.id == id }
     }
     
     // 将文章添加到列表

@@ -1,7 +1,7 @@
 import Foundation
 import NaturalLanguage
 
-struct Article: Identifiable, Codable {
+struct Article: Identifiable, Codable, TextContent {
     var id = UUID()
     var title: String
     var content: String
@@ -16,14 +16,7 @@ struct Article: Identifiable, Codable {
         return formatter.string(from: createdAt)
     }
     
-    // 获取内容预览
-    func contentPreview() -> String {
-        if content.count > 50 {
-            return String(content.prefix(50)) + "..."
-        } else {
-            return content
-        }
-    }
+    // 获取内容预览方法已移至 TextContent 协议实现
     
     // 检测文章语言
     func detectLanguage() -> String {

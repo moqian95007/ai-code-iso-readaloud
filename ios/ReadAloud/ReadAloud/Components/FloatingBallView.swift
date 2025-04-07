@@ -10,10 +10,18 @@ struct FloatingBallView: View {
     @State private var isDragging = false
     
     // 使用单例模式获取共享实例
-    @ObservedObject private var articleManager = ArticleManager.shared
+    @ObservedObject private var articleManager: ArticleManager
     @ObservedObject private var speechManager = SpeechManager.shared
     @ObservedObject private var documentLibrary = DocumentLibraryManager.shared
     @ObservedObject private var playbackManager = PlaybackManager.shared
+    
+    init(isVisible: Binding<Bool>, 
+         position: Binding<CGPoint>,
+         articleManager: ArticleManager) {
+        self._isVisible = isVisible
+        self._position = position
+        self.articleManager = articleManager
+    }
     
     var body: some View {
         Circle()
@@ -462,7 +470,8 @@ struct FloatingBallView_Previews: PreviewProvider {
             .overlay(
                 FloatingBallView(
                     isVisible: .constant(true),
-                    position: .constant(CGPoint(x: 200, y: 300))
+                    position: .constant(CGPoint(x: 200, y: 300)),
+                    articleManager: ArticleManager()
                 )
             )
     }

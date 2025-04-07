@@ -20,17 +20,18 @@ struct ArticleReaderView: View {
     // 用于防止重复调用playNextArticle
     private static var lastArticlePlayTime: Date = Date(timeIntervalSince1970: 0)
     
-    // 初始化方法
-    init(article: Article, selectedListId: UUID? = nil, useLastPlaylist: Bool = false) {
+    // 自定义初始化方法，接收必要的依赖
+    init(article: Article, selectedListId: UUID? = nil, useLastPlaylist: Bool = false, articleManager: ArticleManager) {
         self._article = State(initialValue: article)
         self.selectedListId = selectedListId
         self.useLastPlaylist = useLastPlaylist
+        self.articleManager = articleManager
     }
     
     // 状态管理
     @StateObject private var speechManager = SpeechManager.shared
     @StateObject private var themeManager = ThemeManager.shared
-    @ObservedObject private var articleManager = ArticleManager.shared
+    @ObservedObject private var articleManager: ArticleManager
     @ObservedObject private var listManager = ArticleListManager.shared
     @StateObject private var timerManager = TimerManager.shared
     

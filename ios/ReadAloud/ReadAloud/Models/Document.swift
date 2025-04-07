@@ -1,6 +1,6 @@
 import Foundation
 
-struct Document: Identifiable, Codable {
+struct Document: Identifiable, Codable, TextContent {
     var id = UUID()
     var title: String
     var content: String
@@ -17,14 +17,7 @@ struct Document: Identifiable, Codable {
         return formatter.string(from: createdAt)
     }
     
-    // 获取内容预览
-    func contentPreview() -> String {
-        if content.count > 50 {
-            return String(content.prefix(50)) + "..."
-        } else {
-            return content
-        }
-    }
+    // 内容预览方法已移至 TextContent 协议实现
     
     // 将文档转换为ArticleList
     func toArticleList() -> ArticleList {
