@@ -50,6 +50,21 @@ class ThemeManager: ObservableObject {
         }
     }
     
+    // 获取高亮背景颜色 - 增强版
+    func highlightBackgroundColor(isHighlighted: Bool, isPlayingHighlight: Bool = true) -> Color {
+        if isHighlighted {
+            if isPlayingHighlight {
+                // 播放状态下使用黄色高亮
+                return isDarkMode ? Color.yellow.opacity(0.4) : Color.yellow.opacity(0.3)
+            } else {
+                // 恢复状态下使用蓝色高亮
+                return isDarkMode ? Color.blue.opacity(0.2) : Color.blue.opacity(0.15)
+            }
+        } else {
+            return Color.clear
+        }
+    }
+    
     // 获取滚动视图背景颜色
     func scrollViewBackgroundColor() -> Color {
         return isDarkMode ? Color(uiColor: .darkGray) : Color(uiColor: .secondarySystemBackground)

@@ -49,9 +49,9 @@ struct EditArticleView: View {
                 
                 // 所属列表
                 Section(header: Text("所属列表")) {
-                    ForEach(listManager.lists) { list in
+                    ForEach(listManager.userLists) { list in
                         // 不显示"所有文章"列表的选项
-                        if list.id != listManager.lists.first?.id {
+                        if list.id != listManager.userLists.first?.id {
                             Toggle(list.name, isOn: Binding(
                                 get: { listManager.isArticleInList(articleId: article.id, listId: list.id) },
                                 set: { isOn in

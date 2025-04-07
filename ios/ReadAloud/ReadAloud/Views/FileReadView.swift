@@ -135,6 +135,12 @@ struct FileReadView: View {
                             UserDefaults.standard.set(document.id.uuidString, forKey: "lastOpenedDocumentId")
                             UserDefaults.standard.synchronize()
                             
+                            // 保存文档打开时间戳
+                            let currentTime = Date().timeIntervalSince1970
+                            UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
+                            print("保存文档播放时间戳: \(currentTime)")
+                            UserDefaults.standard.synchronize()
+                            
                             // 触发全屏展示
                             showDocumentReader = true
                             print("已触发文档阅读器显示")
@@ -218,6 +224,10 @@ struct DocumentListView: View {
     @Binding var showDocumentReader: Bool
     @Binding var showImportError: Bool
     @Binding var errorMessage: String
+    @State private var refreshID = UUID() // 添加一个状态变量用于强制刷新
+    @State private var showDeleteConfirmation = false
+    @State private var documentsToDelete: [Document] = []
+    @State private var indexSetToDelete: IndexSet?
     
     var body: some View {
         VStack {
@@ -227,15 +237,8 @@ struct DocumentListView: View {
                     DocumentEditItem(document: document, documentLibrary: documentLibrary)
                         .id(document.id) // 确保每个项都有唯一ID
                 }
-                .onDelete { indexSet in
-                    print("列表删除文档")
-                    documentLibrary.deleteDocument(at: indexSet)
-                    // 确保删除后刷新文档列表
-                    DispatchQueue.main.async {
-                        print("列表删除后刷新文档列表")
-                        documentLibrary.loadDocuments()
-                    }
-                }
+                // 替换原有的onDelete处理
+                .onDelete { _ in } // 不再直接响应系统的删除操作
             } else {
                 // 普通模式下的文档列表
                 ForEach(documentLibrary.documents) { document in
@@ -250,8 +253,18 @@ struct DocumentListView: View {
                 }
             }
         }
-        // 使用文档数量作为ID，强制在文档数量变化时刷新视图
-        .id(documentLibrary.documents.count)
+        .id(refreshID) // 使用 refreshID 作为视图的 ID
+        .onAppear {
+            // 确保视图出现时加载最新文档
+            documentLibrary.loadDocuments()
+            refreshID = UUID() // 强制刷新视图
+        }
+        .onChange(of: documentLibrary.documents.count) { _ in
+            // 当文档数量变化时刷新视图
+            print("文档数量发生变化，刷新视图")
+            refreshID = UUID() // 强制刷新视图
+        }
+        // 删除原来的alert弹窗，由DocumentEditItem自己处理删除确认
     }
 }
 
@@ -416,6 +429,8 @@ struct DocumentEditItem: View {
     let documentLibrary: DocumentLibraryManager
     // 添加一个内部状态来控制该项是否应该显示
     @State private var isDeleted = false
+    // 添加删除确认弹窗的状态
+    @State private var showDeleteConfirmation = false
     
     var body: some View {
         if !isDeleted {
@@ -438,19 +453,8 @@ struct DocumentEditItem: View {
                 
                 // 删除按钮
                 Button(action: {
-                    if let index = documentLibrary.documents.firstIndex(where: { $0.id == document.id }) {
-                        print("删除文档: \(document.title)")
-                        documentLibrary.deleteDocument(at: IndexSet(integer: index))
-                        // 标记该项为已删除，从视图中移除
-                        withAnimation {
-                            isDeleted = true
-                        }
-                        // 确保删除后刷新文档列表
-                        DispatchQueue.main.async {
-                            print("删除后刷新文档列表")
-                            documentLibrary.loadDocuments()
-                        }
-                    }
+                    // 显示确认弹窗
+                    showDeleteConfirmation = true
                 }) {
                     Image(systemName: "trash")
                         .foregroundColor(.red)
@@ -464,6 +468,30 @@ struct DocumentEditItem: View {
                     .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
             )
             .padding(.horizontal)
+            // 使用confirmationDialog替代alert
+            .confirmationDialog("确认删除", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+                Button("取消", role: .cancel) {
+                    // 取消操作，什么都不做
+                }
+                
+                Button("删除", role: .destructive) {
+                    if let index = documentLibrary.documents.firstIndex(where: { $0.id == document.id }) {
+                        print("删除文档: \(document.title)")
+                        documentLibrary.deleteDocument(at: IndexSet(integer: index))
+                        // 标记该项为已删除，从视图中移除
+                        withAnimation {
+                            isDeleted = true
+                        }
+                        // 确保删除后刷新文档列表
+                        DispatchQueue.main.async {
+                            print("删除后刷新文档列表")
+                            documentLibrary.loadDocuments()
+                        }
+                    }
+                }
+            } message: {
+                Text("确定要删除文档\"\(document.title)\"吗？此操作无法撤销。")
+            }
         } else {
             // 已删除的项不显示任何内容
             EmptyView()
@@ -675,6 +703,11 @@ struct DocumentReaderView: View {
                 // 保存当前文档ID为最近打开的文档
                 UserDefaults.standard.set(document.id.uuidString, forKey: "lastOpenedDocumentId")
                 print("文档阅读器出现，设置最近打开文档ID为\(document.id.uuidString)")
+                
+                // 保存文档打开时间戳
+                let currentTime = Date().timeIntervalSince1970
+                UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
+                print("保存文档播放时间戳: \(currentTime)")
                 UserDefaults.standard.synchronize()
                 
                 // 2秒后强制隐藏加载指示器，即使加载没完成也给用户响应
@@ -819,14 +852,15 @@ struct DocumentArticleReaderView: View {
             foundValidCache = true
             
             // 同时预先设置章节列表，确保后续获取章节列表正常
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [document = self.document] in
                 // 创建完整的文章列表供播放器使用
                 let articleList = sortedChapters.map { chapter -> Article in
                     return Article(
-                        id: UUID(),
+                        id: chapter.id,  // 使用章节ID确保唯一性
                         title: chapter.title,
                         content: chapter.content,
-                        createdAt: document.createdAt
+                        createdAt: document.createdAt,
+                        listId: document.id // 保持列表关联
                     )
                 }
                 
@@ -840,14 +874,16 @@ struct DocumentArticleReaderView: View {
         
         // 创建初始Article
         let initialArticle = Article(
+            id: UUID(),  // 为初始文章分配唯一ID，而不是使用文档ID
             title: initialTitle,
             content: initialContent,
-            createdAt: document.createdAt
+            createdAt: document.createdAt,
+            listId: document.id // 保持列表关联
         )
         
         self._currentArticle = State(initialValue: initialArticle)
         
-        print("Article初始化完成: \(initialArticle.title), 内容长度: \(initialArticle.content.count)")
+        print("Article初始化完成: \(initialArticle.title), 内容长度: \(initialArticle.content.count), ID: \(initialArticle.id)")
     }
     
     var body: some View {
@@ -914,77 +950,33 @@ struct DocumentArticleReaderView: View {
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let existingChapters = try? JSONDecoder().decode([Chapter].self, from: data),
            !existingChapters.isEmpty {
+            print("找到缓存的章节数据: \(existingChapters.count)个章节")
             
-            // 检查章节内容是否有效
-            let validChapters = existingChapters.filter { !$0.content.isEmpty }
-            if validChapters.count == existingChapters.count {
-                print("使用现有章节缓存: \(existingChapters.count)个章节")
-                
-                // 确保章节按顺序排列
-                let sortedChapters = existingChapters.sorted(by: { $0.startIndex < $1.startIndex })
-                
-                // 注意：确保更新chapterManager.chapters和调用updateArticleFromChapters
-                // 都在主线程上完成，避免潜在的线程问题
-                DispatchQueue.main.async {
-                    self.chapterManager.chapters = sortedChapters
-                    self.updateArticleFromChapters(sortedChapters)
-                    self.hasLoadedChapters = true
-                    
-                    // 确保所有章节都加入到播放列表中
-                    let articleList = sortedChapters.map { chapter -> Article in
-                        return Article(
-                            id: UUID(),
-                            title: chapter.title,
-                            content: chapter.content,
-                            createdAt: self.document.createdAt
-                        )
-                    }
-                    
-                    // 更新播放列表，确保所有章节都可用
-                    SpeechManager.shared.updatePlaylist(articleList)
-                    print("已更新完整播放列表，包含 \(articleList.count) 篇文章")
-                    
-                    // 为通知处理添加观察者
-                    self.setupArticleListNotificationObserver()
-                    
-                    // 立即隐藏加载指示器
-                    self.isLoading = false
-                    
-                    // 检查是否有保存的章节索引，如果有则手动切换到该章节
-                    // 这是为了确保UI显示的是正确的章节，而不总是从第一章开始
-                    let lastChapterKey = "lastChapter_\(self.document.id.uuidString)"
-                    if UserDefaults.standard.object(forKey: lastChapterKey) != nil {
-                        let savedIndex = UserDefaults.standard.integer(forKey: lastChapterKey)
-                        if savedIndex >= 0 && savedIndex < sortedChapters.count && savedIndex != 0 {
-                            // 有上次阅读的章节且不是第一章，强制切换
-                            print("强制UI显示之前阅读的章节: \(savedIndex+1)/\(sortedChapters.count)")
-                            if articleList.count > savedIndex {
-                                // 直接设置当前文章为上次阅读的章节
-                                self.currentArticle = articleList[savedIndex]
-                            }
-                        }
-                    }
-                }
-                
-                // 已经在初始化时使用了第一章，这里不需要再更新当前文章
-                return
-            } else {
-                print("章节缓存无效，将重新处理")
-                
-                // 删除无效缓存
-                UserDefaults.standard.removeObject(forKey: saveKey)
-                
-                // 在后台处理章节
-                DispatchQueue.global(qos: .userInitiated).async {
-                    self.processChapters()
-                }
+            // 更新章节管理器
+            DispatchQueue.main.async {
+                self.chapterManager.chapters = existingChapters
+                self.chapterManager.isProcessing = false
+                self.hasLoadedChapters = true
+                self.isLoading = false
+                print("已加载缓存的章节数据")
             }
-        } else {
-            print("没有找到章节缓存，将处理章节")
+            return
+        }
+        
+        // 如果没有缓存，开始识别章节
+        print("没有找到章节缓存，开始识别章节")
+        self.chapterManager.isProcessing = true
+        self.isLoading = true
+        
+        // 在后台线程进行章节识别
+        DispatchQueue.global(qos: .userInitiated).async {
+            let chapters = self.chapterManager.identifyChapters(for: self.document)
             
-            // 在后台处理章节
-            DispatchQueue.global(qos: .userInitiated).async {
-                self.processChapters()
+            // 在主线程更新UI
+            DispatchQueue.main.async {
+                self.hasLoadedChapters = true
+                self.isLoading = false
+                print("章节识别完成，共\(chapters.count)个章节")
             }
         }
     }
@@ -1011,7 +1003,7 @@ struct DocumentArticleReaderView: View {
                 documentId: document.id
             )
             
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [document = self.document] in
                 // 更新章节管理器
                 self.chapterManager.chapters = [emptyChapter]
                 self.chapterManager.isProcessing = false
@@ -1019,9 +1011,11 @@ struct DocumentArticleReaderView: View {
                 
                 // 更新当前文章
                 self.currentArticle = Article(
+                    id: UUID(),  // 为文章创建唯一ID
                     title: "内容为空",
                     content: "(文档内容为空或未正确加载)",
-                    createdAt: document.createdAt
+                    createdAt: document.createdAt,
+                    listId: document.id
                 )
                 
                 // 设置加载完成标志
@@ -1048,7 +1042,7 @@ struct DocumentArticleReaderView: View {
         print("在后台线程处理章节，内容长度: \(docCopy.content.count)")
         let chapters = self.chapterManager.identifyChapters(for: docCopy)
         
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [document = self.document] in            
             print("章节处理完成，章节数: \(chapters.count)")
             
             if !chapters.isEmpty {
@@ -1095,14 +1089,35 @@ struct DocumentArticleReaderView: View {
         
         guard !chapters.isEmpty else { return }
         
-        // 创建文章列表，添加章节编号到标题
+        // 创建文章列表，添加章节编号到标题，特殊处理前言章节
         let articleList = chapters.enumerated().map { (index, chapter) -> Article in
+            // 为每个章节创建一个文章对象
+            let title: String
+            if chapter.title == "前言" {
+                // 保持前言标题不变
+                title = "前言"
+            } else {
+                // 普通章节添加章节编号
+                // 如果有前言，则章节序号-1，保持与原文一致
+                let hasPrologue = chapters.contains { $0.title == "前言" }
+                let chapterNumber = hasPrologue ? index : index + 1
+                title = "第\(chapterNumber)章: \(chapter.title)"
+            }
+            
             return Article(
-                id: UUID(),  // 仍使用随机ID
-                title: "第\(index+1)章: \(chapter.title)",  // 标题中添加章节编号
+                id: chapter.id,  // 使用章节ID确保唯一性
+                title: title,
                 content: chapter.content,
-                createdAt: document.createdAt
+                createdAt: document.createdAt,
+                listId: document.id // 保持列表关联
             )
+        }
+        
+        // 预先检测第一篇文章的语言
+        if !articleList.isEmpty {
+            let firstArticle = articleList[0]
+            let language = firstArticle.detectLanguage()
+            print("文档第一篇文章的语言: \(language)")
         }
         
         // 更新播放列表 - 确保包含所有章节
@@ -1215,6 +1230,11 @@ struct DocumentArticleReaderView: View {
         // 设置最近播放内容类型为document
         UserDefaults.standard.set("document", forKey: "lastPlayedContentType")
         
+        // 更新文档播放时间戳
+        let currentTime = Date().timeIntervalSince1970
+        UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
+        print("保存文档进度时更新播放时间戳: \(currentTime)")
+        
         // 当前章节的进度
         let currentChapterProgress = SpeechManager.shared.currentProgress
         
@@ -1240,19 +1260,27 @@ struct DocumentArticleReaderView: View {
             // 首先直接尝试从章节标题中提取章节号
             let articleTitle = managerArticle.title
             
+            // 如果是前言，直接使用第一章
+            if articleTitle == "前言" && !chapters.isEmpty {
+                currentIndex = 0
+                currentPlayingArticle = managerArticle
+                print("当前文章是前言，设置索引为0")
+            }
             // 匹配模式 "第X章" 或 "第X章: 标题"
-            if let range = articleTitle.range(of: "第(\\d+)章", options: .regularExpression),
+            else if let range = articleTitle.range(of: "第(\\d+)章", options: .regularExpression),
                let numEndIndex = articleTitle.range(of: "章", options: .backwards, range: range)?.lowerBound {
                 let numStartIndex = articleTitle.index(after: range.lowerBound) // 跳过"第"字
                 let numberString = articleTitle[numStartIndex..<numEndIndex]
                 
                 if let chapterNumber = Int(numberString), chapterNumber > 0, chapterNumber <= chapters.count {
-                    currentIndex = chapterNumber - 1
+                    // 检查是否有前言，如果有前言要调整索引
+                    let hasPrologue = chapters.contains { $0.title == "前言" }
+                    currentIndex = hasPrologue ? chapterNumber : chapterNumber - 1
                     currentPlayingArticle = managerArticle
                     print("根据章节标题直接确定索引: \(currentIndex+1)/\(chapters.count)")
                 }
             }
-            // 如果无法从标题中提取章节号，尝试在播放列表中找到对应文章
+            // 如果通过标题无法匹配，尝试通过内容匹配
             else if let idx = speechManager.lastPlayedArticles.firstIndex(where: { $0.title == managerArticle.title }) {
                 currentPlayingArticle = managerArticle
                 currentIndex = idx
@@ -1381,11 +1409,25 @@ struct DocumentArticleReaderView: View {
             
             // 将章节转换为文章列表，使用与updateArticleFromChapters相同的格式
             let articleList = self.chapterManager.chapters.enumerated().map { (index, chapter) -> Article in
+                // 为每个章节创建一个文章对象
+                let title: String
+                if chapter.title == "前言" {
+                    // 保持前言标题不变
+                    title = "前言"
+                } else {
+                    // 普通章节添加章节编号
+                    // 如果有前言，则章节序号-1，保持与原文一致
+                    let hasPrologue = self.chapterManager.chapters.contains { $0.title == "前言" }
+                    let chapterNumber = hasPrologue ? index : index + 1
+                    title = "第\(chapterNumber)章: \(chapter.title)"
+                }
+                
                 return Article(
-                    id: UUID(),
-                    title: "第\(index+1)章: \(chapter.title)",
+                    id: chapter.id,  // 使用章节ID确保唯一性
+                    title: title,
                     content: chapter.content,
-                    createdAt: self.document.createdAt
+                    createdAt: self.document.createdAt,
+                    listId: self.document.id // 保持列表关联
                 )
             }
             

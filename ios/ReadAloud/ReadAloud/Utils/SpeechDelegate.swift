@@ -40,8 +40,22 @@ class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, ObservableObject {
         
         // 确保SpeechManager知道我们已经开始朗读
         let manager = SpeechManager.shared
+        let playbackManager = PlaybackManager.shared
+        
+        // 同步更新本地和全局状态
         if !manager.isPlaying {
+            print("检测到AVSpeechSynthesizer开始播放，同步更新SpeechManager状态")
             manager.isPlaying = true
+            manager.objectWillChange.send()
+        }
+        
+        // 同步全局播放状态 - 确保与本地状态一致
+        if !playbackManager.isPlaying && manager.isPlaying {
+            if let article = manager.getCurrentArticle() {
+                print("检测到AVSpeechSynthesizer开始播放，同步更新PlaybackManager状态")
+                let contentType: PlaybackContentType = article.id.description.hasPrefix("doc-") ? .document : .article
+                playbackManager.startPlayback(contentId: article.id, title: article.title, type: contentType)
+            }
         }
     }
     
@@ -53,9 +67,23 @@ class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, ObservableObject {
         
         // 获取SpeechManager以更新进度
         let manager = SpeechManager.shared
+        let playbackManager = PlaybackManager.shared
         
         // 重置正在朗读标志
         isSpeaking = false
+        
+        // 同步更新UI状态
+        if manager.isPlaying {
+            print("检测到合成器完成播放，但SpeechManager状态未更新，正在同步...")
+            manager.isPlaying = false
+            manager.objectWillChange.send()
+        }
+        
+        // 同步全局播放状态
+        if playbackManager.isPlaying {
+            print("检测到合成器完成播放，但PlaybackManager状态未更新，正在同步...")
+            playbackManager.stopPlayback()
+        }
         
         // 检查是否是从中间位置开始的播放
         let isStartedFromMiddle = startPosition > 0
@@ -112,6 +140,23 @@ class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, ObservableObject {
         
         // 表示这是由用户主动取消的
         wasManuallyPaused = true
+        
+        // 同步SpeechManager和PlaybackManager状态
+        let manager = SpeechManager.shared
+        let playbackManager = PlaybackManager.shared
+        
+        // 同步更新SpeechManager状态
+        if manager.isPlaying {
+            print("检测到合成器取消播放，同步更新SpeechManager状态")
+            manager.isPlaying = false
+            manager.objectWillChange.send()
+        }
+        
+        // 同步全局播放状态
+        if playbackManager.isPlaying {
+            print("检测到合成器取消播放，同步更新PlaybackManager状态")
+            playbackManager.stopPlayback()
+        }
         
         // 不要重置高亮范围和起始位置，以便能够在单篇循环模式下正确恢复
         // highlightRange = NSRange(location: 0, length: 0)

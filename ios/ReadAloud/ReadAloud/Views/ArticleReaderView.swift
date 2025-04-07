@@ -117,6 +117,19 @@ struct ArticleReaderView: View {
                     .onChange(of: speechDelegate.highlightRange) { _ in
                         scrollToCurrentParagraph(scrollView: scrollView)
                     }
+                    .onAppear {
+                        // 初始化时滚动到上次播放位置
+                        if speechManager.isResuming && !speechManager.isPlaying && isAppLaunch {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                if let paragraphId = getLastPlaybackParagraphId() {
+                                    print("初始化时滚动到上次播放位置: \(paragraphId)")
+                                    withAnimation {
+                                        scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: 0.25))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             
@@ -276,7 +289,13 @@ struct ArticleReaderView: View {
                             isAppLaunch = false
                         }
                     }) {
-                        Image(systemName: speechManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        // 获取全局播放状态
+                        let playbackManager = PlaybackManager.shared
+                        // 判断是否应该显示为播放状态：本地播放状态或全局状态表明当前文章正在播放
+                        let shouldShowPlaying = speechManager.isPlaying || 
+                            (playbackManager.isPlaying && playbackManager.currentContentId == article.id)
+                        
+                        Image(systemName: shouldShowPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .resizable()
                             .frame(width: 50, height: 50)
                             .foregroundColor(themeManager.isDarkMode ? .white : .blue)
@@ -530,6 +549,14 @@ struct ArticleReaderView: View {
             // 初始化语音管理器
             speechManager.setup(for: article)
             
+            // 在初始化后，检查当前文章是否正在全局播放
+            let playbackManager = PlaybackManager.shared
+            if playbackManager.isPlaying && playbackManager.currentContentId == article.id {
+                print("检测到当前文章正在全局播放，同步更新本地播放状态")
+                speechManager.isPlaying = true
+                speechManager.objectWillChange.send()
+            }
+            
             // 强制立即刷新进度条和高亮状态
             if speechManager.isResuming {
                 print("立即刷新进度条：位置 \(speechManager.currentPlaybackPosition), 进度: \(Int(speechManager.currentProgress * 100))%")
@@ -538,35 +565,9 @@ struct ArticleReaderView: View {
                 speechManager.forceUpdateUI()
             }
             
-            // 优先检查合成器的实际状态 - 这是最可靠的
-            let actualSpeakingState = SpeechManager.shared.getSynthesizerStatus()
-            print("合成器当前状态检查 - 是否在朗读: \(actualSpeakingState)")
-            
-            if actualSpeakingState {
-                // 如果合成器实际在朗读，则强制UI显示为播放状态
-                if !speechManager.isPlaying {
-                    print("检测到合成器正在朗读，强制更新UI为播放状态")
-                    speechManager.isPlaying = true
-                    speechManager.objectWillChange.send()
-                }
-            } else {
-                // 尝试通过文章ID进行次级检查
-                let isCurrentArticlePlaying = speechManager.isArticlePlaying(articleId: article.id)
-                print("检查文章播放状态 - 文章ID: \(article.id), 是否在播放: \(isCurrentArticlePlaying)")
-                
-                // 如果文章正在播放中，但界面没有显示播放状态，强制更新界面状态
-                if isCurrentArticlePlaying && !speechManager.isPlaying {
-                    print("发现不同步状态：文章正在播放但UI显示为暂停状态，正在修复...")
-                    speechManager.isPlaying = true
-                    speechManager.objectWillChange.send()
-                }
-            }
-            
-            // 完整检查并同步播放状态，确保UI与合成器状态一致
+            // 进行单次完整的播放状态检查和同步，而不是多次重复检查
+            print("执行单次完整的播放状态检查和同步...")
             checkAndSyncPlaybackState()
-            
-            // 不需要重新加载文章列表，使用当前已有的数据
-            // articleManager.loadArticles() - 移除这行以避免重复加载
             
             // 通知已进入播放界面
             NotificationCenter.default.post(name: Notification.Name("EnterPlaybackView"), object: nil)
@@ -772,6 +773,29 @@ struct ArticleReaderView: View {
         return nil
     }
     
+    // 获取上次播放位置所在的段落ID
+    private func getLastPlaybackParagraphId() -> String? {
+        let lastPosition = speechManager.currentPlaybackPosition
+        if lastPosition <= 0 {
+            return nil
+        }
+        
+        let paragraphs = article.content.components(separatedBy: "\n\n")
+        var currentPosition = 0
+        
+        for (index, paragraph) in paragraphs.enumerated() {
+            let paragraphLength = paragraph.count + 2 // +2 for "\n\n"
+            
+            if lastPosition >= currentPosition && lastPosition < currentPosition + paragraphLength {
+                return "paragraph_\(index)"
+            }
+            
+            currentPosition += paragraphLength
+        }
+        
+        return nil
+    }
+    
     // 检查语音语言是否与文章语言兼容
     private func isLanguageCompatible(voiceLanguage: String, articleLanguage: String) -> Bool {
         // 特殊情况处理
@@ -791,6 +815,14 @@ struct ArticleReaderView: View {
         if (voiceMainLanguage == "zh" || voiceMainLanguage == "yue" || voiceMainLanguage == "cmn") &&
            (articleMainLanguage == "zh" || articleMainLanguage == "yue" || articleMainLanguage == "cmn") {
             print("中文变体语言，视为兼容")
+            return true
+        }
+        
+        // 特殊处理：英文和中文语音的广泛兼容性
+        // 有些用户可能喜欢用英文声音读中文，或用中文声音读英文
+        if (voiceMainLanguage == "zh" && articleMainLanguage == "en") ||
+           (voiceMainLanguage == "en" && articleMainLanguage == "zh") {
+            print("中英文跨语言朗读，允许用户使用")
             return true
         }
         
@@ -816,9 +848,22 @@ struct ArticleReaderView: View {
     private func checkAndSyncPlaybackState() {
         print("开始检查并同步播放状态...")
         
-        // 获取AVSpeechSynthesizer实例当前是否在朗读
+        // 获取PlaybackManager实例
+        let playbackManager = PlaybackManager.shared
+        
+        // 获取AVSpeechSynthesizer实例当前是否在朗读 - getSynthesizerStatus方法已经增强了状态检测
         let isSpeaking = SpeechManager.shared.getSynthesizerStatus()
-        print("合成器状态检查 - 是否在朗读: \(isSpeaking)，UI显示状态: \(speechManager.isPlaying)")
+        print("合成器状态检查 - 是否在朗读: \(isSpeaking)，UI显示状态: \(speechManager.isPlaying)，全局状态: \(playbackManager.isPlaying)")
+        
+        // 检查播放状态是否一致
+        let isUiStateSynced = (isSpeaking == speechManager.isPlaying)
+        let isGlobalStateSynced = (speechManager.isPlaying == playbackManager.isPlaying)
+        
+        if isUiStateSynced && isGlobalStateSynced {
+            // 所有状态一致，无需操作
+            print("所有播放状态已同步，无需修复")
+            return
+        }
         
         // 如果合成器在朗读但界面显示为暂停，更新界面状态
         if isSpeaking && !speechManager.isPlaying {
@@ -829,7 +874,13 @@ struct ArticleReaderView: View {
             
             // 强制UI进行刷新
             speechManager.objectWillChange.send()
-            print("已将UI状态更新为播放中")
+            
+            // 更新全局播放状态
+            if !playbackManager.isPlaying {
+                playbackManager.startPlayback(contentId: article.id, title: article.title, type: .article)
+            }
+            
+            print("已将UI状态更新为播放中，全局状态已同步")
         }
         // 如果合成器不在朗读但界面显示为播放中，更新界面状态
         else if !isSpeaking && speechManager.isPlaying {
@@ -840,10 +891,27 @@ struct ArticleReaderView: View {
             
             // 强制UI进行刷新
             speechManager.objectWillChange.send()
-            print("已将UI状态更新为暂停")
+            
+            // 更新全局播放状态
+            if playbackManager.isPlaying {
+                playbackManager.stopPlayback()
+            }
+            
+            print("已将UI状态更新为暂停，全局状态已同步")
         }
-        else {
-            print("播放状态已同步，无需修复")
+        // 确保本地UI状态与全局状态保持一致
+        else if speechManager.isPlaying != playbackManager.isPlaying {
+            print("检测到UI状态与全局状态不一致，正在同步...")
+            
+            if speechManager.isPlaying {
+                // 本地在播放但全局显示为暂停，更新全局状态
+                playbackManager.startPlayback(contentId: article.id, title: article.title, type: .article)
+                print("已更新全局状态为播放中")
+            } else {
+                // 本地已暂停但全局显示为播放中，更新全局状态
+                playbackManager.stopPlayback()
+                print("已更新全局状态为暂停")
+            }
         }
     }
     

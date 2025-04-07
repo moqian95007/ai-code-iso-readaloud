@@ -8,6 +8,7 @@ struct Chapter: Identifiable, Codable, Equatable {
     var startIndex: Int // 在原文中的起始位置
     var endIndex: Int // 在原文中的结束位置
     var documentId: UUID // 所属文档ID
+    var listId: UUID? // 添加所属列表ID，与文章保持一致
     
     // 计算章节序号
     var chapterNumber: Int {
@@ -89,5 +90,14 @@ struct Chapter: Identifiable, Codable, Equatable {
         result += temp
         
         return result == 0 ? 1 : result // 如果解析失败，默认返回1
+    }
+    
+    // 获取内容预览，与Article保持一致
+    func contentPreview() -> String {
+        if content.count > 50 {
+            return String(content.prefix(50)) + "..."
+        } else {
+            return content
+        }
     }
 } 

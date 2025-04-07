@@ -8,6 +8,9 @@
 import SwiftUI
 import AVFoundation
 
+// 确保引入了 PlaybackContentType 和 PlaybackManager
+// 这两个类型在 ArticleHighlightedText.swift 中定义
+
 @main
 struct ReadAloudApp: App {
     // 使用ObservedObject来订阅FloatingBallManager的变化
@@ -18,6 +21,9 @@ struct ReadAloudApp: App {
     
     // 添加SpeechManager实例
     @ObservedObject private var speechManager = SpeechManager.shared
+    
+    // 添加PlaybackManager实例，用于全局播放状态管理
+    @ObservedObject private var playbackManager = PlaybackManager.shared
     
     // 初始化，设置后台音频播放
     init() {
@@ -73,11 +79,18 @@ struct ReadAloudApp: App {
             // 添加生命周期事件处理
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                 // 应用即将进入后台，保存进度但不停止播放
-                speechManager.savePlaybackProgress()
+                if speechManager.isPlaying {
+                    print("应用进入后台，保存播放进度")
+                    // 保存当前播放状态到全局播放管理器
+                    if let article = speechManager.getCurrentArticle() {
+                        let contentType: PlaybackContentType = article.id.description.hasPrefix("doc-") ? .document : .article
+                        playbackManager.startPlayback(contentId: article.id, title: article.title, type: contentType)
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                // 应用进入前台，重新设置音频会话
-                self.setupBackgroundAudio()
+                // 应用恢复到前台，同步播放状态
+                print("应用恢复到前台，同步播放状态")
             }
         }
     }

@@ -12,13 +12,13 @@ struct EditListsView: View {
     var body: some View {
         NavigationView {
             List {
-                ForEach(listManager.lists) { list in
+                ForEach(listManager.userLists) { list in
                     HStack {
                         Text(list.name)
                         Spacer()
                         
                         // 编辑按钮
-                        if list.id != listManager.lists.first?.id { // 不允许编辑"所有文章"列表
+                        if list.id != listManager.userLists.first?.id { // 不允许编辑"所有文章"列表
                             Button(action: {
                                 editingListId = list.id
                                 editingListName = list.name

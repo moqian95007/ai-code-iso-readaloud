@@ -50,7 +50,7 @@ struct AddArticleView: View {
                 // 列表选择
                 Section(header: Text("添加到列表")) {
                     Picker("选择列表", selection: $selectedListId) {
-                        ForEach(listManager.lists) { list in
+                        ForEach(listManager.userLists) { list in
                             Text(list.name).tag(list.id as UUID?)
                         }
                     }
@@ -69,7 +69,7 @@ struct AddArticleView: View {
                         // 如果选择了列表且不是默认的"所有文章"列表，将文章添加到该列表
                         if let listId = selectedListId, 
                            let articleId = newArticle?.id,
-                           listManager.lists.first?.id != listId {
+                           listManager.userLists.first?.id != listId {
                             listManager.addArticleToList(articleId: articleId, listId: listId)
                         }
                         

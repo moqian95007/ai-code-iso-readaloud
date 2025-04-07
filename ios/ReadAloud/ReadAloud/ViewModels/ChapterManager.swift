@@ -26,7 +26,6 @@ class ChapterManager: ObservableObject {
             
             DispatchQueue.main.async {
                 self.chapters = existingChapters
-                // 设置处理状态
                 self.isProcessing = false
                 self.progressPercentage = 100
             }
@@ -260,7 +259,36 @@ class ChapterManager: ObservableObject {
         print("开始创建\(chapterPositions.count)个章节...")
         // 创建章节 - 使用更高效的方法
         var resultChapters: [Chapter] = []
-        resultChapters.reserveCapacity(chapterPositions.count) // 预分配内存
+        resultChapters.reserveCapacity(chapterPositions.count + 1) // 预分配内存，+1是为了可能的前言章节
+        
+        // 检查第一个章节的起始位置，如果不是从头开始，则创建一个前言章节
+        if chapterPositions.first!.start > 0 {
+            let prefaceContent = String(content[content.startIndex..<content.index(content.startIndex, offsetBy: chapterPositions.first!.start)])
+            
+            // 确保前言内容不为空
+            if !prefaceContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                print("发现前言内容，长度: \(prefaceContent.count)字符")
+                
+                // 创建前言章节
+                let prefaceChapter = Chapter(
+                    id: UUID(),
+                    title: "前言",
+                    content: prefaceContent,
+                    startIndex: 0,
+                    endIndex: chapterPositions.first!.start,
+                    documentId: document.id,
+                    listId: document.id
+                )
+                
+                // 添加前言章节到结果列表
+                resultChapters.append(prefaceChapter)
+                print("创建前言章节: ID=\(prefaceChapter.id.uuidString), 内容长度=\(prefaceContent.count)")
+            } else {
+                print("第一章前的内容仅包含空白字符，跳过前言章节创建")
+            }
+        } else {
+            print("第一章从文档开头开始，不需要创建前言章节")
+        }
         
         // 使用批处理方式创建章节，减轻UI线程负担
         let batchSize = min(10, chapterPositions.count) // 每次处理10个章节
@@ -282,15 +310,24 @@ class ChapterManager: ObservableObject {
                 let endStringIndex = content.index(content.startIndex, offsetBy: min(chapterEndIndex, content.count))
                 let chapterContent = String(content[startStringIndex..<endStringIndex])
                 
+                // 为每个章节创建唯一的ID
                 let chapter = Chapter(
+                    id: UUID(), // 显式创建新的UUID，确保每个章节ID唯一
                     title: title,
                     content: chapterContent,
                     startIndex: chapterStartIndex,
                     endIndex: chapterEndIndex,
-                    documentId: document.id
+                    documentId: document.id,
+                    listId: document.id // 设置章节所属列表ID为文档ID
                 )
                 
+                // 添加章节到结果列表
                 resultChapters.append(chapter)
+                
+                // 添加日志记录章节ID
+                if i % 10 == 0 || i == endIndex - 1 {
+                    print("创建章节: ID=\(chapter.id.uuidString), 标题=\(chapter.title)")
+                }
                 
                 // 更新进度 (章节创建占进度的50%)
                 let progress = 50.0 + (Double(i) / Double(max(1, chapterPositions.count - 1)) * 50.0)
@@ -352,22 +389,53 @@ class ChapterManager: ObservableObject {
         return resultChapters
     }
     
-    // 创建默认章节
+    // 创建一个默认章节
     private func createDefaultChapter(content: String, documentId: UUID) -> Chapter {
         return Chapter(
-            title: "全文",
+            id: UUID(), // 明确指定唯一ID
+            title: "完整内容",
             content: content,
             startIndex: 0,
             endIndex: content.count,
-            documentId: documentId
+            documentId: documentId,
+            listId: documentId // 设置章节所属列表ID为文档ID
         )
     }
     
     // 保存文档的章节划分
     private func saveChapters(_ chapters: [Chapter], for documentId: UUID) {
-        if let encoded = try? JSONEncoder().encode(chapters) {
+        // 设置每个章节的documentId和listId，并确保ID唯一
+        var updatedChapters: [Chapter] = []
+        
+        for chapter in chapters {
+            // 确保每个章节有唯一ID和正确的引用
+            let updatedChapter = ensureChapterProperties(chapter, documentId: documentId)
+            updatedChapters.append(updatedChapter)
+        }
+        
+        // 保存章节数据
+        if let encoded = try? JSONEncoder().encode(updatedChapters) {
             UserDefaults.standard.set(encoded, forKey: saveKey + documentId.uuidString)
-            print("保存了\(chapters.count)个章节")
+            print("保存了\(updatedChapters.count)个章节")
+            
+            // 更新文档的章节ID列表
+            let chapterIds = updatedChapters.map { $0.id }
+            
+            // 更新文档库中的章节ID
+            let documentLibrary = DocumentLibraryManager.shared
+            if let document = documentLibrary.findDocument(by: documentId) {
+                var updatedDocument = document
+                updatedDocument.chapterIds = chapterIds
+                documentLibrary.updateDocument(updatedDocument)
+                print("更新了文档的章节ID列表: \(chapterIds.count)个章节")
+            }
+            
+            // 确保将章节添加到对应的ArticleList中
+            for chapter in updatedChapters {
+                ArticleListManager.shared.addArticleToList(articleId: chapter.id, listId: documentId)
+            }
+        } else {
+            print("章节编码失败")
         }
     }
     
@@ -376,6 +444,34 @@ class ChapterManager: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: saveKey + documentId.uuidString) {
             if let decoded = try? JSONDecoder().decode([Chapter].self, from: data) {
                 print("加载了\(decoded.count)个章节")
+                
+                // 检查是否有重复ID
+                let ids = decoded.map { $0.id }
+                let uniqueIds = Set(ids)
+                if ids.count != uniqueIds.count {
+                    print("警告: 加载的章节中存在\(ids.count - uniqueIds.count)个重复ID!")
+                    
+                    // 创建新的章节数组，确保每个章节有唯一ID
+                    var fixedChapters: [Chapter] = []
+                    var seenIds = Set<UUID>()
+                    
+                    for chapter in decoded {
+                        var updatedChapter = chapter
+                        if seenIds.contains(chapter.id) {
+                            print("修复重复ID: \(chapter.id.uuidString) -> 创建新ID")
+                            updatedChapter.id = UUID()
+                        }
+                        seenIds.insert(updatedChapter.id)
+                        fixedChapters.append(updatedChapter)
+                    }
+                    
+                    // 保存修复后的章节
+                    print("保存修复后的\(fixedChapters.count)个章节")
+                    saveChapters(fixedChapters, for: documentId)
+                    return fixedChapters
+                }
+                
+                // 正常返回加载的章节
                 return decoded
             }
         }
@@ -385,9 +481,36 @@ class ChapterManager: ObservableObject {
     // 清除文档的章节划分
     func clearChapters(for documentId: UUID) {
         UserDefaults.standard.removeObject(forKey: saveKey + documentId.uuidString)
-        if documentId == chapters.first?.documentId {
+        if chapters.first?.documentId == documentId {
             chapters.removeAll()
         }
         print("清除了文档的章节划分")
+    }
+    
+    // 保存当前识别出的章节
+    func saveChapters(for documentId: UUID) {
+        print("保存当前\(chapters.count)个章节到文档ID: \(documentId)")
+        saveChapters(chapters, for: documentId)
+    }
+    
+    // 确保章节具有所有必需的属性
+    private func ensureChapterProperties(_ chapter: Chapter, documentId: UUID) -> Chapter {
+        var updatedChapter = chapter
+        
+        // 保留原始ID，不要覆盖
+        // 只有在必要时才分配新ID
+        if updatedChapter.id == UUID() || updatedChapter.id == UUID.init() {
+            print("章节ID为默认值，分配新ID")
+            updatedChapter.id = UUID()
+        }
+        
+        // 记录章节ID，以便调试
+        print("保存章节 - 保留原始ID: \(updatedChapter.id.uuidString)")
+        
+        // 设置文档ID和列表ID
+        updatedChapter.documentId = documentId
+        updatedChapter.listId = documentId
+        
+        return updatedChapter
     }
 } 

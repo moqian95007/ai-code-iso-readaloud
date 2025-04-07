@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import MediaPlayer
+import Combine
 
 /// 播放模式枚举
 enum PlaybackMode: String, CaseIterable {
@@ -19,6 +20,9 @@ enum PlaybackMode: String, CaseIterable {
         }
     }
 }
+
+// 引入 Views/PlaybackManager.swift 中定义的类型
+// PlaybackContentType 和 PlaybackManager 在 Views/PlaybackManager.swift 中定义
 
 /// 管理语音合成和朗读的类
 class SpeechManager: ObservableObject {
@@ -51,6 +55,14 @@ class SpeechManager: ObservableObject {
     // 当前文章
     private var currentArticle: Article?
     private var currentText: String = ""
+    
+    // 全局播放管理器 - 使用延迟加载避免循环依赖
+    private lazy var playbackManager: PlaybackManager = {
+        return PlaybackManager.shared
+    }()
+    
+    // 订阅集合
+    private var cancellables = Set<AnyCancellable>()
     
     // 为SpeechDelegate提供访问当前文本的方法
     var currentTextCount: Int {
@@ -153,11 +165,16 @@ class SpeechManager: ObservableObject {
             playbackMode = mode
         }
         
-        // 加载上一次播放的文章列表
+        // 加载上次播放的文章列表
         loadLastPlayedArticles()
         
         // 监听朗读状态变化
         setupSpeechDelegateObserver()
+        
+        // 延迟设置PlaybackManager观察者，避免初始化时的循环依赖
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.setupPlaybackManagerObserver()
+        }
     }
     
     // 设置音频会话
@@ -192,7 +209,7 @@ class SpeechManager: ObservableObject {
         
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             guard let self = self, self.isPlaying else { return .success }
-            self.pauseSpeaking()
+            self.pauseSpeaking(updateGlobalState: false)
             return .success
         }
         
@@ -223,6 +240,24 @@ class SpeechManager: ObservableObject {
             name: NSNotification.Name("SpeechFinished"),
             object: nil
         )
+    }
+    
+    // 设置PlaybackManager监听器
+    private func setupPlaybackManagerObserver() {
+        // 监听全局播放管理器的状态变化
+        playbackManager.$isPlaying
+            .sink { [weak self] isPlaying in
+                // 如果全局播放状态变为已停止，但本地状态仍为播放中，则停止本地播放
+                guard let self = self else { return }
+                
+                if !isPlaying && self.isPlaying {
+                    // 防止循环调用：只有当状态不一致时才调用暂停
+                    DispatchQueue.main.async {
+                        self.pauseSpeaking(updateGlobalState: false)
+                    }
+                }
+            }
+            .store(in: &cancellables)
     }
     
     // 处理朗读完成事件
@@ -530,7 +565,7 @@ class SpeechManager: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
     
-    // 开始朗读
+    // 开始朗读全文
     func startSpeaking() {
         print("开始朗读全文，进行额外的安全检查")
         
@@ -541,6 +576,11 @@ class SpeechManager: ObservableObject {
             return
         }
         lastStartTime = now
+        
+        // 如果全局有其他内容在播放，先停止它
+        if playbackManager.isPlaying && playbackManager.currentContentId != currentArticle?.id {
+            playbackManager.stopPlayback()
+        }
         
         // 如果正在播放，先停止当前播放
         if synthesizer.isSpeaking {
@@ -557,6 +597,8 @@ class SpeechManager: ObservableObject {
         
         // 不在播放中，直接开始
         doStartSpeaking()
+        
+        print("开始朗读完成")
     }
     
     // 实际执行朗读的内部方法
@@ -591,6 +633,10 @@ class SpeechManager: ObservableObject {
             
             // 记录当前我们正在朗读这篇文章
             UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            
+            // 更新全局播放状态
+            let contentType: PlaybackContentType = articleId.description.hasPrefix("doc-") ? .document : .article
+            playbackManager.startPlayback(contentId: articleId, title: currentArticle?.title ?? "", type: contentType)
         }
         
         // 开始朗读
@@ -653,6 +699,10 @@ class SpeechManager: ObservableObject {
             
             // 记录当前我们正在朗读这篇文章
             UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            
+            // 更新全局播放状态
+            let contentType: PlaybackContentType = articleId.description.hasPrefix("doc-") ? .document : .article
+            playbackManager.startPlayback(contentId: articleId, title: currentArticle?.title ?? "", type: contentType)
         }
         
         if safePosition >= currentText.count || currentText.isEmpty {
@@ -760,13 +810,10 @@ class SpeechManager: ObservableObject {
         
         // 开始定时器更新进度
         startTimer()
-        
-        print("开始朗读完成")
-        print("=======================================")
     }
     
     // 暂停朗读
-    func pauseSpeaking() {
+    func pauseSpeaking(updateGlobalState: Bool = true) {
         guard isPlaying else { return }
         
         // 添加防抖动，避免短时间内多次触发
@@ -795,6 +842,14 @@ class SpeechManager: ObservableObject {
             UserDefaults.standard.set(currentProgress, forKey: UserDefaultsKeys.lastProgress(for: articleId))
             UserDefaults.standard.set(currentTime, forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
             UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            
+            // 无论updateGlobalState参数如何，始终更新全局状态
+            // 这是为了确保全局状态与本地状态一致
+            playbackManager.pausePlayback()
+            
+            // 添加额外的日志
+            print("暂停朗读 - 已更新本地状态和全局状态")
+            print("本地状态: isPlaying=\(isPlaying), 全局状态: \(playbackManager.isPlaying)")
         }
         
         // 更新锁屏控制中心信息
@@ -837,6 +892,9 @@ class SpeechManager: ObservableObject {
             
             // 更新状态
             isPlaying = false
+            
+            // 更新全局播放状态
+            playbackManager.stopPlayback()
             
             // 停止定时器
             stopTimer()
@@ -1375,24 +1433,60 @@ class SpeechManager: ObservableObject {
     
     // 获取合成器当前状态
     func getSynthesizerStatus() -> Bool {
+        // 主要状态检查：检查合成器是否真正在播放
         let isSpeaking = synthesizer.isSpeaking
+        let isPaused = synthesizer.isPaused
         
-        // 添加更多日志信息
+        // 更可靠的合成器状态检测：如果合成器处于暂停状态，则不应该被认为是在播放
+        let actualSpeakingState = isSpeaking && !isPaused
+        
+        // 添加更多日志信息，包括详细的状态信息
         if let currentArticle = currentArticle {
-            print("获取合成器状态 - 是否正在朗读: \(isSpeaking), 当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+            print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
         } else {
-            print("获取合成器状态 - 是否正在朗读: \(isSpeaking), 没有当前文章")
+            print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 没有当前文章")
         }
         
         // 如果合成器正在朗读，但UI状态不同步，记录额外信息帮助调试
-        if isSpeaking && !isPlaying {
+        if actualSpeakingState && !isPlaying {
             if let currentArticle = currentArticle {
                 print("状态不一致 - 合成器正在朗读但UI显示为暂停，当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+                
+                // 更新本地状态
+                isPlaying = true
+                self.objectWillChange.send()
+                
+                // 更新全局播放状态
+                let contentType: PlaybackContentType = currentArticle.id.description.hasPrefix("doc-") ? .document : .article
+                playbackManager.startPlayback(contentId: currentArticle.id, title: currentArticle.title, type: contentType)
             } else {
                 print("状态不一致 - 合成器正在朗读但UI显示为暂停，且没有当前文章")
             }
+        } else if !actualSpeakingState && isPlaying {
+            // 如果合成器已停止但UI状态仍为播放，同样更新
+            print("状态不一致 - 合成器已停止但UI仍显示为播放")
+            
+            // 更新本地状态
+            isPlaying = false
+            self.objectWillChange.send()
+            
+            // 更新全局播放状态
+            playbackManager.stopPlayback()
+        } else {
+            // 确保全局状态与本地状态一致
+            if let currentArticle = currentArticle {
+                if isPlaying != playbackManager.isPlaying {
+                    print("本地与全局状态不一致，正在同步 - 本地: \(isPlaying), 全局: \(playbackManager.isPlaying)")
+                    if isPlaying {
+                        let contentType: PlaybackContentType = currentArticle.id.description.hasPrefix("doc-") ? .document : .article
+                        playbackManager.startPlayback(contentId: currentArticle.id, title: currentArticle.title, type: contentType)
+                    } else {
+                        playbackManager.stopPlayback()
+                    }
+                }
+            }
         }
         
-        return isSpeaking
+        return actualSpeakingState
     }
 }

@@ -179,13 +179,47 @@ struct VoiceSelectorView: View {
     
     // 检查语音语言是否与文章语言兼容
     private func isLanguageCompatible(voiceLanguage: String, articleLanguage: String) -> Bool {
+        // 特殊情况处理
+        if voiceLanguage.isEmpty || articleLanguage.isEmpty {
+            print("语言代码为空，默认兼容")
+            return true // 如果语言代码为空，默认为兼容
+        }
+        
         // 提取语言代码（如 "zh-CN" 中的 "zh"）
         let voiceMainLanguage = voiceLanguage.split(separator: "-").first?.lowercased() ?? voiceLanguage.lowercased()
         let articleMainLanguage = articleLanguage.split(separator: "-").first?.lowercased() ?? articleLanguage.lowercased()
         
         print("比较语音语言: \(voiceMainLanguage) 与文章语言: \(articleMainLanguage)")
         
+        // 特殊处理：部分中文变体兼容性
+        if (voiceMainLanguage == "zh" || voiceMainLanguage == "yue" || voiceMainLanguage == "cmn") &&
+           (articleMainLanguage == "zh" || articleMainLanguage == "yue" || articleMainLanguage == "cmn") {
+            print("中文变体语言，视为兼容")
+            return true
+        }
+        
+        // 特殊处理：英文和中文语音的广泛兼容性
+        if (voiceMainLanguage == "zh" && articleMainLanguage == "en") ||
+           (voiceMainLanguage == "en" && articleMainLanguage == "zh") {
+            print("中英文跨语言朗读，允许用户使用")
+            return true
+        }
+        
+        // 特殊处理：语音朗读器
+        if voiceMainLanguage == "auto" {
+            print("语音为自动检测，视为兼容")
+            return true // 自动语言检测，总是视为兼容
+        }
+        
         // 如果主要语言代码相同，则认为兼容
-        return voiceMainLanguage == articleMainLanguage
+        let isCompatible = voiceMainLanguage == articleMainLanguage
+        
+        if isCompatible {
+            print("语言兼容：\(voiceMainLanguage) 与 \(articleMainLanguage)")
+        } else {
+            print("语言不兼容：\(voiceMainLanguage) 与 \(articleMainLanguage)")
+        }
+        
+        return isCompatible
     }
 }

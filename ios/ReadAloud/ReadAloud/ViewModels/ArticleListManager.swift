@@ -12,21 +12,32 @@ class ArticleListManager: ObservableObject {
     private let saveKey = "savedArticleLists"
     private let selectedListKey = "selectedArticleList"
     
+    // 仅获取用户创建的列表（过滤掉文档创建的列表）
+    var userLists: [ArticleList] {
+        return lists.filter { !$0.isDocument }
+    }
+    
     // 私有初始化方法
     private init() {
         loadLists()
         // 如果没有列表，创建一个默认的"所有文章"列表
-        if lists.isEmpty {
+        if userLists.isEmpty {
             addList(name: "所有文章")
         }
         
         // 加载上次选择的列表
         if let savedSelectedId = UserDefaults.standard.string(forKey: selectedListKey),
            let selectedId = UUID(uuidString: savedSelectedId) {
-            selectedListId = selectedId
+            // 确保选择的列表存在且不是文档列表
+            if lists.contains(where: { $0.id == selectedId && !$0.isDocument }) {
+                selectedListId = selectedId
+            } else {
+                // 如果选择的是文档列表或不存在，使用第一个用户列表
+                selectedListId = userLists.first?.id
+            }
         } else {
-            // 如果没有保存选择，使用第一个列表
-            selectedListId = lists.first?.id
+            // 如果没有保存选择，使用第一个用户列表
+            selectedListId = userLists.first?.id
         }
     }
     
@@ -59,8 +70,8 @@ class ArticleListManager: ObservableObject {
         let newList = ArticleList(name: name)
         lists.append(newList)
         
-        // 如果这是第一个列表，自动选择它
-        if lists.count == 1 {
+        // 如果这是第一个用户列表，自动选择它
+        if userLists.count == 1 {
             selectedListId = newList.id
         }
         
@@ -77,17 +88,27 @@ class ArticleListManager: ObservableObject {
     
     // 删除列表
     func deleteList(at indexSet: IndexSet) {
-        // 防止删除最后一个列表
-        if lists.count <= 1 {
+        // 将indexSet转换为用户列表的索引
+        let userListIndexes = indexSet.map { userLists[$0] }
+        
+        // 防止删除最后一个用户列表
+        if userLists.count <= 1 {
             return
         }
         
-        let idsToDelete = indexSet.map { lists[$0].id }
-        lists.remove(atOffsets: indexSet)
+        // 获取要删除的ID
+        let idsToDelete = userListIndexes.map { $0.id }
         
-        // 如果删除了当前选中的列表，切换到第一个列表
+        // 从完整列表中移除
+        for id in idsToDelete {
+            if let index = lists.firstIndex(where: { $0.id == id }) {
+                lists.remove(at: index)
+            }
+        }
+        
+        // 如果删除了当前选中的列表，切换到第一个用户列表
         if let selectedId = selectedListId, idsToDelete.contains(selectedId) {
-            selectedListId = lists.first?.id
+            selectedListId = userLists.first?.id
         }
         
         saveLists()
@@ -127,5 +148,10 @@ class ArticleListManager: ObservableObject {
     // 获取包含指定文章的所有列表
     func listsContainingArticle(articleId: UUID) -> [ArticleList] {
         return lists.filter { $0.articleIds.contains(articleId) }
+    }
+    
+    // 获取包含指定文章的用户列表（过滤掉文档列表）
+    func userListsContainingArticle(articleId: UUID) -> [ArticleList] {
+        return lists.filter { !$0.isDocument && $0.articleIds.contains(articleId) }
     }
 } 

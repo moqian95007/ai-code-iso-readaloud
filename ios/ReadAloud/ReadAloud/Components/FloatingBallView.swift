@@ -13,6 +13,7 @@ struct FloatingBallView: View {
     @ObservedObject private var articleManager = ArticleManager.shared
     @ObservedObject private var speechManager = SpeechManager.shared
     @ObservedObject private var documentLibrary = DocumentLibraryManager.shared
+    @ObservedObject private var playbackManager = PlaybackManager.shared
     
     var body: some View {
         Circle()
@@ -52,7 +53,7 @@ struct FloatingBallView: View {
     
     // 处理浮动球点击事件
     private func handleBallTap() {
-        print("浮动球被点击")
+        print("浮动球被点击，尝试打开上次播放的内容")
         
         // 设置标志表明是从浮动球进入，防止自动播放
         UserDefaults.standard.set(true, forKey: "isFromFloatingBall")
@@ -68,15 +69,54 @@ struct FloatingBallView: View {
         let contentTypeKey = "lastPlayedContentType"
         var lastPlayedType = UserDefaults.standard.string(forKey: contentTypeKey) ?? "article"
         
-        // 检查文档库中是否有最近打开的文档，如果有则优先使用文档类型
-        if let lastDocIdString = UserDefaults.standard.string(forKey: "lastOpenedDocumentId"),
-           let lastDocId = UUID(uuidString: lastDocIdString),
-           documentLibrary.findDocument(by: lastDocId) != nil {
-            lastPlayedType = "document" 
-            print("通过检查最近打开的文档ID发现有效文档，覆盖内容类型为document")
+        // 记录最近使用的时间戳，用于判断最近使用的是哪种内容类型
+        var lastArticleTime: TimeInterval = 0
+        var lastDocumentTime: TimeInterval = 0
+        
+        // 检查最近的文章播放时间
+        if let articleIdString = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastPlayedArticleId),
+           let articleId = UUID(uuidString: articleIdString),
+           let article = articleManager.findArticle(by: articleId) {
+            // 获取文章最后播放时间
+            if let playTime = getLastPlayTime(for: article.id) {
+                lastArticleTime = playTime.timeIntervalSince1970
+                print("最近播放的文章 '\(article.title)' 时间戳: \(lastArticleTime)")
+            }
         }
         
-        print("最近播放的内容类型: \(lastPlayedType)")
+        // 检查最近的文档播放时间
+        if let docIdString = UserDefaults.standard.string(forKey: "lastOpenedDocumentId"),
+           let docId = UUID(uuidString: docIdString),
+           let document = documentLibrary.findDocument(by: docId) {
+            // 使用文档创建时间或更新时间作为参考
+            let docTime = UserDefaults.standard.double(forKey: "lastDocumentPlayTime_\(docId.uuidString)")
+            if docTime > 0 {
+                lastDocumentTime = docTime
+                print("最近播放的文档 '\(document.title)' 时间戳: \(lastDocumentTime)")
+            }
+        }
+        
+        // 根据最近播放时间决定优先打开哪种内容
+        if lastArticleTime > 0 && lastDocumentTime > 0 {
+            // 如果两者都有时间戳，比较哪个更近
+            if lastArticleTime > lastDocumentTime {
+                lastPlayedType = "article"
+                print("基于时间戳比较，文章(\(lastArticleTime))比文档(\(lastDocumentTime))更近，优先打开文章")
+            } else {
+                lastPlayedType = "document"
+                print("基于时间戳比较，文档(\(lastDocumentTime))比文章(\(lastArticleTime))更近，优先打开文档")
+            }
+        } else if lastArticleTime > 0 {
+            // 只有文章有时间戳
+            lastPlayedType = "article"
+            print("只有文章有时间戳记录，优先打开文章")
+        } else if lastDocumentTime > 0 {
+            // 只有文档有时间戳
+            lastPlayedType = "document"
+            print("只有文档有时间戳记录，优先打开文档")
+        }
+        
+        print("最终决定的内容类型: \(lastPlayedType)")
         // 记录UserDefaults中所有与内容类型相关的键值对
         print("调试UserDefaults - lastOpenedDocumentId: \(UserDefaults.standard.string(forKey: "lastOpenedDocumentId") ?? "nil")")
         print("调试UserDefaults - lastPlayedArticleId: \(UserDefaults.standard.string(forKey: UserDefaultsKeys.lastPlayedArticleId) ?? "nil")")

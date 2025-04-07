@@ -12,6 +12,11 @@ struct ArticleListView: View {
     @State private var selectedArticle: Article? = nil
     @State private var isShowingArticleReader = false
     @State private var shouldUseLastPlaylist = false
+    @State private var isEditMode = false  // 添加编辑模式状态变量
+    
+    // 添加删除确认相关状态
+    @State private var articleToDelete: Article? = nil
+    @State private var showDeleteConfirmation = false
     
     // 添加一个专门用于浮动球跳转的状态变量
     @State private var isNavigatingFromBall = false
@@ -23,12 +28,11 @@ struct ArticleListView: View {
             if articleManager.articles.isEmpty {
                 emptyStateView
             } else {
-                ZStack {
-                    articleListView
-                }
+                articleListView
             }
         }
         .navigationBarItems(
+            leading: managementButton,
             trailing: addButton
         )
         .toolbar {
@@ -86,12 +90,45 @@ struct ArticleListView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ShowAddListView"))) { _ in
             showingAddListSheet = true
         }
+        // 添加全局确认对话框
+        .confirmationDialog(
+            "确认删除",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("取消", role: .cancel) {
+                // 取消删除操作
+                print("取消删除")
+                articleToDelete = nil
+            }
+            
+            Button("删除", role: .destructive) {
+                // 确认删除文章
+                if let article = articleToDelete {
+                    print("确认删除文章: \(article.title)")
+                    // 找到文章在原始数组中的索引
+                    if let originalIndex = articleManager.articles.firstIndex(where: { $0.id == article.id }) {
+                        let originalIndexSet = IndexSet(integer: originalIndex)
+                        articleManager.deleteArticle(at: originalIndexSet)
+                        print("已删除文章，索引: \(originalIndex)")
+                    }
+                }
+                // 重置状态
+                articleToDelete = nil
+            }
+        } message: {
+            if let article = articleToDelete {
+                Text("确定要删除文章\"\(article.title)\"吗？此操作无法撤销。")
+            } else {
+                Text("确定要删除选中的文章吗？此操作无法撤销。")
+            }
+        }
     }
     
     // 列表选择器下拉菜单
     private var listSelectorMenu: some View {
         Menu {
-            ForEach(listManager.lists) { list in
+            ForEach(listManager.userLists) { list in
                 Button(action: {
                     listManager.selectedListId = list.id
                 }) {
@@ -175,14 +212,19 @@ struct ArticleListView: View {
             // 文章列表
             List {
                 ForEach(filteredArticles) { article in
-                    articleRow(for: article)
+                    // 根据是否处于编辑模式显示不同的行
+                    if isEditMode {
+                        articleEditRow(for: article)
+                    } else {
+                        articleRow(for: article)
+                    }
                 }
-                .onDelete(perform: articleManager.deleteArticle)
             }
             .listStyle(PlainListStyle())
+            .environment(\.editMode, .constant(isEditMode ? .active : .inactive))
             
-            // 播放全部按钮
-            if !filteredArticles.isEmpty {
+            // 播放全部按钮，仅在非编辑模式下显示
+            if !filteredArticles.isEmpty && !isEditMode {
                 Button(action: {
                     if let firstArticle = filteredArticles.first {
                         // 更新播放列表为当前筛选的文章
@@ -227,7 +269,7 @@ struct ArticleListView: View {
         }
         
         // 如果是第一个列表（默认的"所有文章"），显示所有文章
-        if listManager.lists.first?.id == selectedList.id {
+        if listManager.userLists.first?.id == selectedList.id {
             return articles
         }
         
@@ -305,5 +347,43 @@ struct ArticleListView: View {
         // 更新播放列表
         let filteredArticles = filterArticles(articleManager.articles)
         speechManager.updatePlaylist(filteredArticles)
+    }
+    
+    // 管理按钮
+    private var managementButton: some View {
+        Button(action: {
+            // 切换编辑模式
+            isEditMode.toggle()
+        }) {
+            Text(isEditMode ? "完成" : "管理")
+                .foregroundColor(isEditMode ? .blue : .primary)
+                .font(.system(size: 20, weight: .medium))
+        }
+    }
+    
+    // 编辑模式下的文章行
+    private func articleEditRow(for article: Article) -> some View {
+        HStack {
+            // 文章信息部分
+            articleInfoView(for: article)
+            
+            Spacer()
+            
+            // 删除按钮及其确认对话框
+            Button(action: {
+                print("点击删除按钮，文章: \(article.title)")
+                // 显示删除确认对话框
+                articleToDelete = article
+                showDeleteConfirmation = true
+                print("显示删除确认对话框")
+            }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+                    .font(.system(size: 22))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .contentShape(Rectangle())
     }
 } 
