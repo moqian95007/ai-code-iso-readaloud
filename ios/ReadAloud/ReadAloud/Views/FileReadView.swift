@@ -9,6 +9,7 @@ struct FileReadView: View {
     @State private var isEditMode = false // 编辑模式标志
     @State private var selectedDocument: Document? = nil // 选择的文档
     @State private var showDocumentReader = false // 是否显示阅读器
+    @State private var isImporting = false // 添加导入中状态
     
     // 必要的管理器
     @ObservedObject private var articleManager: ArticleManager // 移除单例引用
@@ -27,41 +28,75 @@ struct FileReadView: View {
     
     var body: some View {
         NavigationView {
-            VStack {
-                // 顶部标题栏
-                HeaderView(isEditMode: $isEditMode)
-                
-                // 主内容区域
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // 本地文件导入按钮
-                        if !isEditMode {
-                            ImportButton(showImportPicker: $showImportPicker)
+            ZStack {
+                VStack {
+                    // 顶部标题栏
+                    HeaderView(isEditMode: $isEditMode)
+                    
+                    // 主内容区域
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            // 本地文件导入按钮
+                            if !isEditMode {
+                                ImportButton(showImportPicker: $showImportPicker, isImporting: $isImporting)
+                            }
+                            
+                            // 文档列表区域
+                            DocumentListView(
+                                isEditMode: isEditMode,
+                                documentLibrary: documentLibrary,
+                                selectedDocument: $selectedDocument,
+                                showDocumentReader: $showDocumentReader,
+                                showImportError: $showImportError,
+                                errorMessage: $errorMessage
+                            )
+                            
+                            // 如果没有导入的文档，显示提示
+                            if documentLibrary.documents.isEmpty {
+                                Text("尚未导入任何文档")
+                                    .foregroundColor(.gray)
+                                    .padding()
+                            }
                         }
-                        
-                        // 文档列表区域
-                        DocumentListView(
-                            isEditMode: isEditMode,
-                            documentLibrary: documentLibrary,
-                            selectedDocument: $selectedDocument,
-                            showDocumentReader: $showDocumentReader,
-                            showImportError: $showImportError,
-                            errorMessage: $errorMessage
-                        )
-                        
-                        // 如果没有导入的文档，显示提示
-                        if documentLibrary.documents.isEmpty {
-                            Text("尚未导入任何文档")
-                                .foregroundColor(.gray)
-                                .padding()
-                        }
+                        .padding(.top)
                     }
-                    .padding(.top)
+                    
+                    Spacer()
                 }
+                .background(Color(.systemBackground))
                 
-                Spacer()
+                // 导入中遮罩层
+                if isImporting {
+                    ZStack {
+                        Color.black.opacity(0.7)
+                            .edgesIgnoringSafeArea(.all)
+                        
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(2.0)
+                                .padding()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            
+                            Text("文档导入中...")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            
+                            Text("请稍候，正在处理文件")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .padding(30)
+                        .background(Color(.systemBackground).opacity(0.2))
+                        .cornerRadius(20)
+                        .shadow(radius: 15)
+                    }
+                    .zIndex(100) // 确保遮罩在最上层
+                    .transition(.opacity)
+                    .animation(.easeInOut, value: isImporting)
+                    .edgesIgnoringSafeArea(.all)
+                }
             }
-            .background(Color(.systemBackground))
             .navigationBarHidden(true)
             .onAppear {
                 print("FileReadView出现")
@@ -78,9 +113,18 @@ struct FileReadView: View {
             } content: {
                 DocumentPickerView(documentManager: documentManager) { success in
                     print("文档选择结果: \(success)")
+                    
+                    // 隐藏导入中遮罩
+                    withAnimation {
+                        isImporting = false
+                        print("隐藏导入中遮罩层")
+                    }
+                    
                     if success {
+                        // 导入成功，显示成功消息
                         showImportSuccess = true
                     } else {
+                        // 导入失败，显示错误消息
                         errorMessage = "导入文档失败，请检查文件格式或权限"
                         showImportError = true
                     }
@@ -89,7 +133,7 @@ struct FileReadView: View {
             .alert("导入成功", isPresented: $showImportSuccess) {
                 Button("确定", role: .cancel) { }
             } message: {
-                Text("文档已成功导入并转换为可朗读的文本")
+                Text("文档已成功导入并转换为可朗读的文本。章节识别正在后台进行中，识别完成前文档暂不可点击。")
             }
             .alert("导入失败", isPresented: $showImportError) {
                 Button("确定", role: .cancel) { }
@@ -129,25 +173,56 @@ struct FileReadView: View {
                         print("收到OpenDocument通知，设置最近播放内容类型为document")
                         UserDefaults.standard.synchronize()
                         
-                        // 设置选中文档并显示阅读器
-                        DispatchQueue.main.async {
-                            // 先设置文档，然后显示阅读器
-                            selectedDocument = document
-                            print("选择文档: \(document.title)")
+                        // 检查阅读器是否已经显示，如果是则先关闭再打开
+                        if showDocumentReader {
+                            print("阅读器已显示，先关闭再重新打开")
                             
-                            // 设置最近打开的文档ID
-                            UserDefaults.standard.set(document.id.uuidString, forKey: "lastOpenedDocumentId")
-                            UserDefaults.standard.synchronize()
-                            
-                            // 保存文档打开时间戳
-                            let currentTime = Date().timeIntervalSince1970
-                            UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
-                            print("保存文档播放时间戳: \(currentTime)")
-                            UserDefaults.standard.synchronize()
-                            
-                            // 触发全屏展示
-                            showDocumentReader = true
-                            print("已触发文档阅读器显示")
+                            // 先关闭阅读器
+                            DispatchQueue.main.async {
+                                showDocumentReader = false
+                                
+                                // 延迟后再设置文档并显示
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    // 先设置文档，然后显示阅读器
+                                    selectedDocument = document
+                                    print("选择文档: \(document.title)")
+                                    
+                                    // 设置最近打开的文档ID
+                                    UserDefaults.standard.set(document.id.uuidString, forKey: "lastOpenedDocumentId")
+                                    UserDefaults.standard.synchronize()
+                                    
+                                    // 保存文档打开时间戳
+                                    let currentTime = Date().timeIntervalSince1970
+                                    UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
+                                    print("保存文档播放时间戳: \(currentTime)")
+                                    UserDefaults.standard.synchronize()
+                                    
+                                    // 触发全屏展示
+                                    showDocumentReader = true
+                                    print("已触发文档阅读器显示")
+                                }
+                            }
+                        } else {
+                            // 正常设置文档并显示阅读器
+                            DispatchQueue.main.async {
+                                // 先设置文档，然后显示阅读器
+                                selectedDocument = document
+                                print("选择文档: \(document.title)")
+                                
+                                // 设置最近打开的文档ID
+                                UserDefaults.standard.set(document.id.uuidString, forKey: "lastOpenedDocumentId")
+                                UserDefaults.standard.synchronize()
+                                
+                                // 保存文档打开时间戳
+                                let currentTime = Date().timeIntervalSince1970
+                                UserDefaults.standard.set(currentTime, forKey: "lastDocumentPlayTime_\(document.id.uuidString)")
+                                print("保存文档播放时间戳: \(currentTime)")
+                                UserDefaults.standard.synchronize()
+                                
+                                // 触发全屏展示
+                                showDocumentReader = true
+                                print("已触发文档阅读器显示")
+                            }
                         }
                     } else {
                         print("错误：找不到ID为 \(documentId) 的文档")
@@ -191,10 +266,17 @@ struct HeaderView: View {
 // 导入按钮视图
 struct ImportButton: View {
     @Binding var showImportPicker: Bool
+    @Binding var isImporting: Bool  // 添加导入状态绑定
     
     var body: some View {
         Button(action: {
             print("点击了导入按钮")
+            // 立即显示导入中遮罩
+            withAnimation {
+                isImporting = true
+                print("显示导入中遮罩层")
+            }
+            // 立即显示文件选择器
             showImportPicker = true
         }) {
             VStack {
@@ -259,16 +341,21 @@ struct DocumentListView: View {
         }
         .id(refreshID) // 使用 refreshID 作为视图的 ID
         .onAppear {
-            // 确保视图出现时加载最新文档
-            documentLibrary.loadDocuments()
-            refreshID = UUID() // 强制刷新视图
+            // 不直接调用loadDocuments，而是监听加载完成通知
+            print("DocumentListView视图出现")
+            // 仅在需要强制刷新视图时调用
+            refreshID = UUID()
         }
         .onChange(of: documentLibrary.documents.count) { _ in
             // 当文档数量变化时刷新视图
             print("文档数量发生变化，刷新视图")
             refreshID = UUID() // 强制刷新视图
         }
-        // 删除原来的alert弹窗，由DocumentEditItem自己处理删除确认
+        // 接收文档库加载完成通知
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DocumentLibraryLoaded"))) { _ in
+            print("DocumentListView收到文档库加载完成通知，刷新视图")
+            refreshID = UUID() // 强制刷新视图
+        }
     }
 }
 
@@ -281,11 +368,40 @@ struct DocumentItem: View {
     @Binding var showImportError: Bool
     @Binding var errorMessage: String
     @State private var showLoadingIndicator = false
+    @State private var documentProcessingState: DocumentProcessingState = .unknown
+    
+    // 添加防止短时间内重复点击
+    @State private var isSelecting = false
+    
+    // 用于跟踪已经检查过状态的文档ID，避免重复输出日志
+    private static var checkedDocumentIds = Set<UUID>()
+    
+    // 文档处理状态
+    enum DocumentProcessingState {
+        case unknown // 未知状态，初始状态
+        case processing // 正在处理章节
+        case completed // 章节处理完成
+        case error // 处理出错
+    }
     
     var body: some View {
         ZStack {
             // 文档项按钮
             Button(action: {
+                // 防止短时间内重复点击
+                if isSelecting {
+                    print("防止重复点击文档: \(document.title)")
+                    return
+                }
+                
+                // 设置选择状态
+                isSelecting = true
+                
+                // 确保延迟之后才能再次点击
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isSelecting = false
+                }
+                
                 handleDocumentSelection()
             }) {
                 BookItem(
@@ -293,7 +409,27 @@ struct DocumentItem: View {
                     progress: document.progress,
                     fileType: document.fileType
                 )
+                .overlay(
+                    Group {
+                        if documentProcessingState == .processing {
+                            // 章节处理中的覆盖层
+                            ZStack {
+                                Color.black.opacity(0.6)
+                                VStack(spacing: 10) {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(1.2)
+                                    Text("正在识别章节...")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .cornerRadius(10)
+                        }
+                    }
+                )
             }
+            .disabled(documentProcessingState == .processing)
             
             // 加载指示器覆盖
             if showLoadingIndicator {
@@ -312,17 +448,70 @@ struct DocumentItem: View {
                 .background(Color.black.opacity(0.3))
             }
         }
+        .onAppear {
+            // 检查章节是否已处理
+            checkDocumentProcessingState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DocumentChapterProcessingCompleted"))) { notification in
+            if let userInfo = notification.userInfo,
+               let documentId = userInfo["documentId"] as? UUID,
+               documentId == document.id {
+                print("收到章节处理完成通知，文档ID: \(documentId)")
+                documentProcessingState = .completed
+            }
+        }
+    }
+    
+    // 检查文档处理状态
+    private func checkDocumentProcessingState() {
+        // 检查该文档是否有章节缓存，如果有则标记为已完成
+        let saveKey = "documentChapters_" + document.id.uuidString
+        if let data = UserDefaults.standard.data(forKey: saveKey),
+           let chapters = try? JSONDecoder().decode([Chapter].self, from: data),
+           !chapters.isEmpty {
+            // 只有当该文档ID尚未检查过时才输出日志
+            if !DocumentItem.checkedDocumentIds.contains(document.id) {
+                print("文档已有章节缓存，标记为已完成: \(document.title)")
+                // 记录已检查过的文档ID
+                DocumentItem.checkedDocumentIds.insert(document.id)
+            }
+            documentProcessingState = .completed
+        } else {
+            // 检查是否是新导入的文档
+            let timeInterval = Date().timeIntervalSince(document.createdAt)
+            if timeInterval < 60 { // 如果是在1分钟内创建的文档，认为可能是处理中
+                // 只对新导入的文档输出日志
+                print("新导入文档，标记为处理中: \(document.title)")
+                documentProcessingState = .processing
+            } else {
+                // 较老的没有章节缓存的文档，可能是之前处理失败，标记为已完成
+                documentProcessingState = .completed
+            }
+        }
+    }
+    
+    // 清除已检查文档记录的静态方法，用于测试或重置
+    static func clearCheckedDocuments() {
+        checkedDocumentIds.removeAll()
     }
     
     // 处理文档选择
     private func handleDocumentSelection() {
+        // 如果章节正在处理中，不进行操作
+        if documentProcessingState == .processing {
+            print("文档章节正在处理中，暂不可选择: \(document.title)")
+            return
+        }
+        
         // 立即显示加载指示器
         self.showLoadingIndicator = true
         
         // 检查此文档是否已经在播放中
-        let speechManager = SpeechManager.shared
-        let isCurrentlyPlaying = speechManager.isArticlePlaying(articleId: document.id)
-        print("检查文档播放状态 - 文档ID: \(document.id), 是否在播放: \(isCurrentlyPlaying)")
+        let playbackManager = PlaybackManager.shared
+        let isSameDocumentPlaying = playbackManager.isPlaying && 
+                                   playbackManager.contentType == .document &&
+                                   playbackManager.currentContentId == document.id
+        print("检查文档播放状态 - 文档ID: \(document.id), 是否在播放: \(isSameDocumentPlaying)")
         
         // 从文档库中获取最新的文档实例
         if let freshDocument = documentLibrary.findDocument(by: document.id) {
@@ -345,51 +534,21 @@ struct DocumentItem: View {
                 // 设置为选中文档
                 selectedDocument = docCopy
                 
-                // 在后台检查章节缓存 - 不阻塞UI
-                DispatchQueue.global(qos: .background).async {
-                    self.checkChapterCache(for: freshDocument)
-                    
-                    // 延迟一点时间后显示阅读器，确保加载提示能被看到
-                    // 同时给SwiftUI一些时间预热ArticleReaderView
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        self.showLoadingIndicator = false
-                        print("立即显示阅读器")
-                        showDocumentReader = true
-                    }
-                }
-            } else {
+                // 设置打开时间
                 DispatchQueue.main.async {
+                    // 显示文档阅读器
+                    showDocumentReader = true
                     self.showLoadingIndicator = false
                 }
-                handleEmptyDocument(document)
+            } else {
+                // 文档内容为空，尝试处理
+                handleEmptyDocument(freshDocument)
             }
         } else {
-            DispatchQueue.main.async {
-                self.showLoadingIndicator = false
-            }
-            print("错误: 未找到文档")
-            errorMessage = "文档不存在或已被删除"
+            print("错误: 找不到文档ID \(document.id)")
+            errorMessage = "找不到指定的文档"
             showImportError = true
-        }
-    }
-    
-    // 在后台检查章节缓存状态
-    private func checkChapterCache(for document: Document) {
-        let saveKey = "documentChapters_" + document.id.uuidString
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let chapters = try? JSONDecoder().decode([Chapter].self, from: data),
-           !chapters.isEmpty, !chapters[0].content.isEmpty {
-            // 已有章节缓存且内容有效，不需处理
-            print("后台检查: 找到有效章节缓存，共\(chapters.count)个章节")
-        } else {
-            // 没有章节缓存或内容无效，在后台处理
-            print("后台检查: 没有找到有效章节缓存，需要预处理")
-            if let data = UserDefaults.standard.data(forKey: saveKey) {
-                print("清除无效缓存")
-                UserDefaults.standard.removeObject(forKey: saveKey)
-            }
-            
-            // 这里不进行实际处理，让文档阅读器视图自己处理
+            self.showLoadingIndicator = false
         }
     }
     
@@ -569,138 +728,72 @@ struct DocumentReaderView: View {
     let documentLibrary: DocumentLibraryManager
     let articleManager: ArticleManager
     @State private var isLoading = true
-    @State private var showContent = false
+    
+    // 添加一个防止重新创建内容的ID
+    @State private var contentId = UUID()
     
     var body: some View {
         // 检查文档是否有效
         if let document = selectedDocument, !document.content.isEmpty {
             ZStack {
-                // 先显示加载界面，减少卡顿感
-                if !showContent {
-                    VStack {
-                        HStack {
-                            Button(action: {
-                                print("关闭文档阅读器")
-                                // 先检查是否有DocumentArticleReaderView并保存进度
-                                if showContent {
-                                    // 发送通知，让DocumentArticleReaderView保存进度
-                                    NotificationCenter.default.post(name: Notification.Name("SaveDocumentProgress"), object: nil)
-                                    // 给保存操作留出时间
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        // 不清除selectedDocument，只关闭阅读器
-                                        showDocumentReader = false
-                                    }
-                                } else {
-                                    // 不清除selectedDocument，只关闭阅读器
-                                    showDocumentReader = false
-                                }
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                    .padding()
+                // 内容视图
+                VStack {
+                    // 头部导航栏
+                    HStack {
+                        Button(action: {
+                            print("关闭文档阅读器")
+                            // 发送通知，让DocumentArticleReaderView保存进度
+                            NotificationCenter.default.post(name: Notification.Name("SaveDocumentProgress"), object: nil)
+                            // 给保存操作留出时间
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // 不清除selectedDocument，只关闭阅读器
+                                showDocumentReader = false
                             }
-                            Spacer()
-                            Text(document.title)
-                                .font(.headline)
-                                .lineLimit(1)
-                            Spacer()
-                            // 使用空间占位符保持布局平衡
+                        }) {
                             Image(systemName: "xmark")
-                                .font(.headline)
-                                .foregroundColor(.clear)
-                                .padding()
-                        }
-                        
-                        Spacer()
-                        
-                        VStack(spacing: 15) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                            Text("正在加载文档...")
                                 .font(.headline)
                                 .foregroundColor(.primary)
-                        }
-                        .padding(30)
-                        .background(Color(.systemBackground).opacity(0.9))
-                        .cornerRadius(15)
-                        .shadow(radius: 10)
-                        
-                        Spacer()
-                    }
-                    .background(Color(.systemBackground))
-                } else {
-                    // 内容视图
-                    VStack {
-                        HStack {
-                            Button(action: {
-                                print("关闭文档阅读器")
-                                // 先检查是否有DocumentArticleReaderView并保存进度
-                                if showContent {
-                                    // 发送通知，让DocumentArticleReaderView保存进度
-                                    NotificationCenter.default.post(name: Notification.Name("SaveDocumentProgress"), object: nil)
-                                    // 给保存操作留出时间
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        // 不清除selectedDocument，只关闭阅读器
-                                        showDocumentReader = false
-                                    }
-                                } else {
-                                    // 不清除selectedDocument，只关闭阅读器
-                                    showDocumentReader = false
-                                }
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                    .padding()
-                            }
-                            Spacer()
-                            Text(document.title)
-                                .font(.headline)
-                                .lineLimit(1)
-                            Spacer()
-                            // 使用空间占位符保持布局平衡
-                            Image(systemName: "xmark")
-                                .font(.headline)
-                                .foregroundColor(.clear)
                                 .padding()
                         }
-                        
-                        if showContent {
-                            DocumentArticleReaderView(
-                                document: document, 
-                                isLoading: $isLoading,
-                                documentLibrary: documentLibrary,
-                                articleManager: articleManager
-                            )
-                        }
+                        Spacer()
+                        Text(document.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Spacer()
+                        // 使用空间占位符保持布局平衡
+                        Image(systemName: "xmark")
+                            .font(.headline)
+                            .foregroundColor(.clear)
+                            .padding()
                     }
-                    .background(Color(.systemBackground))
                     
-                    // 加载指示器覆盖
-                    if isLoading {
-                        VStack(spacing: 15) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                            Text("加载章节中...")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                        }
-                        .padding(30)
-                        .background(Color(.systemBackground).opacity(0.9))
-                        .cornerRadius(15)
-                        .shadow(radius: 10)
+                    // 使用ID确保DocumentArticleReaderView只被创建一次，避免重复初始化
+                    DocumentArticleReaderView(
+                        document: document, 
+                        isLoading: $isLoading,
+                        documentLibrary: documentLibrary,
+                        articleManager: articleManager
+                    )
+                    .id(contentId) // 加上ID保证不会重新创建
+                }
+                .background(Color(.systemBackground))
+                
+                // 加载指示器覆盖
+                if isLoading {
+                    VStack(spacing: 15) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("加载章节中...")
+                            .font(.headline)
+                            .foregroundColor(.primary)
                     }
+                    .padding(30)
+                    .background(Color(.systemBackground).opacity(0.9))
+                    .cornerRadius(15)
+                    .shadow(radius: 10)
                 }
             }
             .onAppear {
-                // 延迟一小段时间显示内容，避免卡顿感
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    withAnimation {
-                        showContent = true
-                    }
-                }
-                
                 // 记录当前播放内容类型为文档
                 UserDefaults.standard.set("document", forKey: "lastPlayedContentType")
                 print("文档阅读器出现，设置最近播放内容类型为document")
@@ -800,6 +893,11 @@ struct ErrorView: View {
 
 // 文档阅读器包装视图，用于将Document转换为Article并展示
 struct DocumentArticleReaderView: View {
+    // 添加静态变量用于防止短时间内重复初始化
+    private static var lastInitTime: Date = Date(timeIntervalSince1970: 0)
+    private static var lastInitDocumentId: UUID? = nil
+    private static var isInitializing: Bool = false
+    
     let document: Document
     let documentLibrary: DocumentLibraryManager
     @StateObject private var chapterManager = ChapterManager()
@@ -811,7 +909,41 @@ struct DocumentArticleReaderView: View {
     @Binding var isLoading: Bool
     let articleManager: ArticleManager
     
+    // 添加防止重复更新currentArticle的变量
+    @State private var lastArticleUpdateTime: Date = Date()
+    @State private var isUpdatingArticle: Bool = false
+    
     init(document: Document, isLoading: Binding<Bool>, documentLibrary: DocumentLibraryManager, articleManager: ArticleManager) {
+        // 检查是否短时间内重复初始化相同文档
+        let now = Date()
+        let isSameDocument = Self.lastInitDocumentId == document.id
+        let isRecentInit = now.timeIntervalSince(Self.lastInitTime) < 0.5
+        
+        if isSameDocument && isRecentInit && Self.isInitializing {
+            print("防止重复初始化DocumentArticleReaderView - 相同文档ID: \(document.id)，间隔: \(now.timeIntervalSince(Self.lastInitTime))秒")
+            // 继续初始化，但不打印详细日志
+            self.document = document
+            self._isLoading = isLoading
+            self.documentLibrary = documentLibrary
+            self.articleManager = articleManager
+            
+            // 创建简单的默认Article，避免过多日志
+            let defaultArticle = Article(
+                id: UUID(),
+                title: document.title,
+                content: "加载中...",
+                createdAt: document.createdAt,
+                listId: document.id
+            )
+            self._currentArticle = State(initialValue: defaultArticle)
+            return
+        }
+        
+        // 设置初始化标志，防止递归初始化
+        Self.isInitializing = true
+        Self.lastInitTime = now
+        Self.lastInitDocumentId = document.id
+        
         print("DocumentArticleReaderView 初始化: \(document.title), 内容长度: \(document.content.count)")
         self.document = document
         self._isLoading = isLoading
@@ -821,7 +953,7 @@ struct DocumentArticleReaderView: View {
         // 确保文档内容有效
         let content = document.content.isEmpty ? "(文档内容为空，请重新导入)" : document.content
         
-        // 尝试预加载章节信息，提高首次显示速度
+        // 初始化使用上次阅读的章节
         var initialTitle = document.title
         var initialContent = content
         
@@ -836,6 +968,18 @@ struct DocumentArticleReaderView: View {
             lastChapterIndex = UserDefaults.standard.integer(forKey: lastChapterKey)
         }
         
+        // 用于保存初始章节ID
+        var initialChapterId = UUID()
+        
+        // 首先检查是否有保存的章节ID
+        let chapterIdKey = "lastChapterId_\(document.id.uuidString)"
+        var savedChapterId: UUID? = nil
+        if let savedIdString = UserDefaults.standard.string(forKey: chapterIdKey),
+           let savedId = UUID(uuidString: savedIdString) {
+            savedChapterId = savedId
+            print("找到保存的章节ID: \(savedIdString)")
+        }
+        
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let chapters = try? JSONDecoder().decode([Chapter].self, from: data),
            !chapters.isEmpty, !chapters[0].content.isEmpty {
@@ -843,46 +987,43 @@ struct DocumentArticleReaderView: View {
             // 确保章节按顺序排列
             let sortedChapters = chapters.sorted(by: { $0.startIndex < $1.startIndex })
             
-            // 使用上次阅读的章节
-            if lastChapterIndex >= 0 && lastChapterIndex < sortedChapters.count {
+            // 首先尝试按ID查找章节
+            if let savedId = savedChapterId,
+               let chapterIndex = sortedChapters.firstIndex(where: { $0.id == savedId }) {
+                let savedChapter = sortedChapters[chapterIndex]
+                initialTitle = savedChapter.title
+                initialContent = savedChapter.content
+                initialChapterId = savedChapter.id
+                print("按ID找到上次阅读的章节: \(savedChapter.title)")
+                print("使用章节ID: \(savedChapter.id.uuidString)")
+            }
+            // 如果没有找到保存的ID，则使用索引
+            else if lastChapterIndex >= 0 && lastChapterIndex < sortedChapters.count {
                 // 使用上次阅读的章节
                 let savedChapter = sortedChapters[lastChapterIndex]
                 initialTitle = savedChapter.title
                 initialContent = savedChapter.content
+                initialChapterId = savedChapter.id // 保存章节ID
                 print("初始化使用上次阅读的章节: 第\(lastChapterIndex+1)章 - \(savedChapter.title)")
+                print("使用章节ID: \(savedChapter.id.uuidString)")
             } else {
                 // 直接使用第一章内容初始化
                 initialTitle = sortedChapters[0].title
                 initialContent = sortedChapters[0].content
+                initialChapterId = sortedChapters[0].id // 保存章节ID
                 print("初始化使用第1章: \(sortedChapters[0].title)")
+                print("使用章节ID: \(sortedChapters[0].id.uuidString)")
             }
             
             foundValidCache = true
             
-            // 同时预先设置章节列表，确保后续获取章节列表正常
-            DispatchQueue.main.async { [document = self.document] in
-                // 创建完整的文章列表供播放器使用
-                let articleList = sortedChapters.map { chapter -> Article in
-                    return Article(
-                        id: chapter.id,  // 使用章节ID确保唯一性
-                        title: chapter.title,
-                        content: chapter.content,
-                        createdAt: document.createdAt,
-                        listId: document.id // 保持列表关联
-                    )
-                }
-                
-                // 预先更新播放列表
-                if !articleList.isEmpty {
-                    SpeechManager.shared.updatePlaylist(articleList)
-                    print("初始化时预设置播放列表，包含 \(articleList.count) 篇文章")
-                }
-            }
+            // 仅保存必要的初始状态，不在初始化方法中异步更新播放列表
+            // 将在onAppear中处理章节列表的更新
         }
         
         // 创建初始Article
         let initialArticle = Article(
-            id: UUID(),  // 为初始文章分配唯一ID，而不是使用文档ID
+            id: initialChapterId,  // 使用章节ID而不是随机ID，确保与播放列表中的ID一致
             title: initialTitle,
             content: initialContent,
             createdAt: document.createdAt,
@@ -891,7 +1032,12 @@ struct DocumentArticleReaderView: View {
         
         self._currentArticle = State(initialValue: initialArticle)
         
-        print("Article初始化完成: \(initialArticle.title), 内容长度: \(initialArticle.content.count), ID: \(initialArticle.id)")
+        print("Article初始化完成: \(initialArticle.title), 内容长度: \(initialArticle.content.count), ID: \(initialArticle.id.uuidString)")
+        
+        // 重置初始化标志
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Self.isInitializing = false
+        }
     }
     
     var body: some View {
@@ -909,6 +1055,9 @@ struct DocumentArticleReaderView: View {
                     isLoading = false
                     return
                 }
+                
+                // 更新播放列表（如果有缓存的章节）
+                updateChapterList()
                 
                 // 预加载章节 - 增加延迟确保界面先显示
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -944,6 +1093,48 @@ struct DocumentArticleReaderView: View {
             UserDefaults.standard.set("document", forKey: "lastPlayedContentType")
             print("文档阅读器消失，设置最近播放内容类型为document")
             UserDefaults.standard.synchronize()
+        }
+    }
+    
+    // 更新章节列表（如果有缓存）
+    private func updateChapterList() {
+        // 检查是否已经有章节数据
+        let saveKey = "documentChapters_" + self.document.id.uuidString
+        if let data = UserDefaults.standard.data(forKey: saveKey),
+           let sortedChapters = try? JSONDecoder().decode([Chapter].self, from: data),
+           !sortedChapters.isEmpty {
+            
+            // 创建完整的文章列表供播放器使用
+            let articleList = sortedChapters.map { chapter -> Article in
+                // 格式化章节标题，与后续处理保持一致
+                let title: String
+                if chapter.title == "前言" {
+                    // 保持前言标题不变
+                    title = "前言"
+                } else {
+                    // 普通章节添加章节编号
+                    // 尝试从章节标题中提取编号
+                    let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : sortedChapters.firstIndex(of: chapter)! + 1
+                    title = "第\(chapterNumber)章: \(chapter.title)"
+                }
+                
+                return Article(
+                    id: chapter.id,  // 使用章节ID确保唯一性
+                    title: title,
+                    content: chapter.content,
+                    createdAt: document.createdAt,
+                    listId: document.id // 保持列表关联
+                )
+            }
+            
+            // 预先更新播放列表
+            if !articleList.isEmpty {
+                SpeechManager.shared.updatePlaylist(articleList)
+                print("初始化时预设置播放列表，包含 \(articleList.count) 篇文章")
+                if let firstArticle = articleList.first, let lastArticle = articleList.last {
+                    print("列表第一篇ID: \(firstArticle.id.uuidString), 最后一篇ID: \(lastArticle.id.uuidString)")
+                }
+            }
         }
     }
     
@@ -1022,7 +1213,7 @@ struct DocumentArticleReaderView: View {
                 
                 // 更新当前文章
                 self.currentArticle = Article(
-                    id: UUID(),  // 为文章创建唯一ID
+                    id: emptyChapter.id,  // 使用章节ID而不是随机ID
                     title: "内容为空",
                     content: "(文档内容为空或未正确加载)",
                     createdAt: document.createdAt,
@@ -1096,9 +1287,24 @@ struct DocumentArticleReaderView: View {
     
     // 从章节更新文章
     private func updateArticleFromChapters(_ chapters: [Chapter]) {
+        print("========= 更新文章列表 =========")
         print("更新文章，章节数: \(chapters.count)")
         
-        guard !chapters.isEmpty else { return }
+        guard !chapters.isEmpty else { 
+            print("错误：章节列表为空")
+            return 
+        }
+        
+        // 检查防抖：如果距离上次更新不足0.5秒，则跳过
+        let now = Date()
+        if now.timeIntervalSince(lastArticleUpdateTime) < 0.5 && isUpdatingArticle {
+            print("防抖：跳过过于频繁的章节更新")
+            return
+        }
+        
+        // 设置正在更新标志
+        isUpdatingArticle = true
+        lastArticleUpdateTime = now
         
         // 创建文章列表，添加章节编号到标题，特殊处理前言章节
         let articleList = chapters.enumerated().map { (index, chapter) -> Article in
@@ -1109,107 +1315,156 @@ struct DocumentArticleReaderView: View {
                 title = "前言"
             } else {
                 // 普通章节添加章节编号
-                // 如果有前言，则章节序号-1，保持与原文一致
-                let hasPrologue = chapters.contains { $0.title == "前言" }
-                let chapterNumber = hasPrologue ? index : index + 1
+                // 尝试从章节标题中提取编号
+                let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : self.chapterManager.chapters.firstIndex(of: chapter)! + 1
                 title = "第\(chapterNumber)章: \(chapter.title)"
             }
             
-            return Article(
+            let article = Article(
                 id: chapter.id,  // 使用章节ID确保唯一性
                 title: title,
                 content: chapter.content,
                 createdAt: document.createdAt,
                 listId: document.id // 保持列表关联
             )
+            
+            // print("创建章节文章: \(title), ID: \(chapter.id)")
+            return article
         }
         
-        // 预先检测第一篇文章的语言
-        if !articleList.isEmpty {
-            let firstArticle = articleList[0]
-            let language = firstArticle.detectLanguage()
-            print("文档第一篇文章的语言: \(language)")
-        }
+        // 预先检测第一篇文章的语言 - 移除，只在需要时检测
         
         // 更新播放列表 - 确保包含所有章节
         SpeechManager.shared.updatePlaylist(articleList)
         print("已更新完整播放列表，包含 \(articleList.count) 篇文章")
+        if !articleList.isEmpty {
+            print("播放列表第一篇ID: \(articleList[0].id)")
+            if articleList.count > 1 {
+                print("播放列表最后一篇ID: \(articleList[articleList.count-1].id)")
+            }
+        }
         
         // 查找上次阅读的章节
         var startingChapterIndex = 0
         let overallProgress = document.progress
         let speechManager = SpeechManager.shared
         
-        // 1. 首先尝试从UserDefaults中获取上次读到的章节索引
-        let lastChapterKey = "lastChapter_\(document.id.uuidString)"
-        if UserDefaults.standard.object(forKey: lastChapterKey) != nil {
-            let savedIndex = UserDefaults.standard.integer(forKey: lastChapterKey)
-            if savedIndex >= 0 && savedIndex < chapters.count {
-                startingChapterIndex = savedIndex
-                print("找到上次保存的章节索引: \(savedIndex+1)/\(chapters.count)")
+        // 0. 首先查找是否有保存的章节ID
+        let chapterIdKey = "lastChapterId_\(document.id.uuidString)"
+        var foundChapterById = false
+        if let savedIdString = UserDefaults.standard.string(forKey: chapterIdKey),
+           let savedId = UUID(uuidString: savedIdString) {
+            print("加载章节列表时找到保存的章节ID: \(savedIdString)")
+            // 在章节列表中查找匹配的ID
+            if let chapterIndex = chapters.firstIndex(where: { $0.id == savedId }) {
+                startingChapterIndex = chapterIndex
+                foundChapterById = true
+                print("根据章节ID找到章节索引: \(chapterIndex+1)/\(chapters.count)")
+            } else {
+                print("警告：找不到匹配保存ID的章节，将尝试使用其他方法")
             }
         }
-        // 2. 如果没有找到保存的章节索引，但文档有阅读进度，尝试根据进度计算
-        else if overallProgress > 0 {
-            print("文档有阅读进度: \(Int(overallProgress * 100))%，尝试找到对应章节")
-            
-            // 计算文档总字符数
-            let totalCharCount = chapters.reduce(0) { $0 + $1.content.count }
-            
-            // 根据总进度计算应该阅读到的字符位置
-            let targetCharPosition = Int(Double(totalCharCount) * overallProgress)
-            
-            // 查找对应的章节
-            var accumulatedChars = 0
-            for (index, chapter) in chapters.enumerated() {
-                let nextAccumulatedChars = accumulatedChars + chapter.content.count
-                
-                // 如果目标位置在当前章节内，找到了对应章节
-                if targetCharPosition >= accumulatedChars && targetCharPosition < nextAccumulatedChars {
-                    startingChapterIndex = index
-                    
-                    // 计算章节内的相对位置
-                    let relativePosition = targetCharPosition - accumulatedChars
-                    let chapterProgress = Double(relativePosition) / Double(chapter.content.count)
-                    
-                    print("根据总进度计算章节：第\(index+1)章，章节内进度约\(Int(chapterProgress * 100))%")
-                    break
+        
+        // 如果没有找到匹配ID的章节，尝试使用之前的方法
+        if !foundChapterById {
+            // 1. 尝试从UserDefaults中获取上次读到的章节索引
+            let lastChapterKey = "lastChapter_\(document.id.uuidString)"
+            if UserDefaults.standard.object(forKey: lastChapterKey) != nil {
+                let savedIndex = UserDefaults.standard.integer(forKey: lastChapterKey)
+                if savedIndex >= 0 && savedIndex < chapters.count {
+                    startingChapterIndex = savedIndex
+                    print("找到上次保存的章节索引: \(savedIndex+1)/\(chapters.count)")
                 }
+            }
+            // 2. 如果没有找到保存的章节索引，但文档有阅读进度，尝试根据进度计算
+            else if overallProgress > 0 {
+                print("文档有阅读进度: \(Int(overallProgress * 100))%，尝试找到对应章节")
                 
-                accumulatedChars = nextAccumulatedChars
+                // 计算文档总字符数
+                let totalCharCount = chapters.reduce(0) { $0 + $1.content.count }
+                
+                // 根据总进度计算应该阅读到的字符位置
+                let targetCharPosition = Int(Double(totalCharCount) * overallProgress)
+                
+                // 查找对应的章节
+                var accumulatedChars = 0
+                for (index, chapter) in chapters.enumerated() {
+                    let nextAccumulatedChars = accumulatedChars + chapter.content.count
+                    
+                    // 如果目标位置在当前章节内，找到了对应章节
+                    if targetCharPosition >= accumulatedChars && targetCharPosition < nextAccumulatedChars {
+                        startingChapterIndex = index
+                        
+                        // 计算章节内的相对位置
+                        let relativePosition = targetCharPosition - accumulatedChars
+                        let chapterProgress = Double(relativePosition) / Double(chapter.content.count)
+                        
+                        print("根据总进度计算章节：第\(index+1)章，章节内进度约\(Int(chapterProgress * 100))%")
+                        break
+                    }
+                    
+                    accumulatedChars = nextAccumulatedChars
+                }
             }
         }
         
         // 确保章节索引有效
         startingChapterIndex = min(startingChapterIndex, chapters.count - 1)
+        print("最终选择的章节索引: \(startingChapterIndex+1)/\(chapters.count)")
         
         // 更新当前文章为开始阅读的章节
         if !articleList.isEmpty {
             let selectedArticle = articleList[startingChapterIndex]
+            print("选择的文章标题: \(selectedArticle.title), ID: \(selectedArticle.id)")
             
-            // 立即更新UI显示的文章内容
-            DispatchQueue.main.async {
-                // 重要：强制更新UI显示
-                withAnimation {
-                    self.currentArticle = selectedArticle
+            // 确保不会频繁更新同一篇文章
+            if self.currentArticle.id != selectedArticle.id || isFirstLoad {
+                // 立即更新UI显示的文章内容
+                DispatchQueue.main.async {
+                    // 重要：强制更新UI显示
+                    withAnimation {
+                        self.currentArticle = selectedArticle
+                    }
+                    print("强制UI显示之前阅读的章节: \(startingChapterIndex+1)/\(chapters.count), ID: \(selectedArticle.id)")
+                    
+                    // 更新isFirstLoad状态，防止重复初始化
+                    if self.isFirstLoad {
+                        self.isFirstLoad = false
+                    }
                 }
-                print("强制UI显示之前阅读的章节: \(startingChapterIndex+1)/\(chapters.count)")
-            }
-            
-            // 设置到SpeechManager
-            speechManager.setup(for: selectedArticle)
-            
-            // 设置章节内的精确位置
-            // 1. 先检查是否有保存的章节内相对位置
-            let chapterPositionKey = "chapterPosition_\(document.id.uuidString)"
-            var chapterProgress = 0.0
-            if UserDefaults.standard.object(forKey: chapterPositionKey) != nil {
-                chapterProgress = UserDefaults.standard.double(forKey: chapterPositionKey)
-                print("找到保存的章节内进度: \(Int(chapterProgress * 100))%")
                 
-                // 计算文本位置
-                let chapter = chapters[startingChapterIndex]
-                let position = Int(Double(chapter.content.count) * chapterProgress)
+                // 设置到SpeechManager
+                speechManager.setup(for: selectedArticle)
+                
+                // 设置章节内的精确位置
+                var chapterProgress = 0.0
+                var position = 0
+                
+                // 1. 首先尝试根据文章ID查找保存的位置
+                let playbackPositionKey = UserDefaultsKeys.lastPlaybackPosition(for: selectedArticle.id)
+                if let savedPosition = UserDefaults.standard.object(forKey: playbackPositionKey) as? Int, savedPosition > 0 {
+                    position = savedPosition
+                    print("根据章节ID找到保存的播放位置: \(position)")
+                    
+                    // 同时获取进度
+                    let progressKey = UserDefaultsKeys.lastProgress(for: selectedArticle.id)
+                    if let savedProgress = UserDefaults.standard.object(forKey: progressKey) as? Double {
+                        chapterProgress = savedProgress
+                        print("根据章节ID找到保存的进度: \(Int(chapterProgress * 100))%")
+                    }
+                }
+                // 2. 如果没有找到特定章节的位置，使用文档级别的位置
+                else {
+                    let chapterPositionKey = "chapterPosition_\(document.id.uuidString)"
+                    if UserDefaults.standard.object(forKey: chapterPositionKey) != nil {
+                        chapterProgress = UserDefaults.standard.double(forKey: chapterPositionKey)
+                        print("找到保存的章节内进度: \(Int(chapterProgress * 100))%")
+                        
+                        // 计算文本位置
+                        let chapter = chapters[startingChapterIndex]
+                        position = Int(Double(chapter.content.count) * chapterProgress)
+                    }
+                }
                 
                 // 如果有具体位置，设置SpeechManager的currentPlaybackPosition并立即更新UI
                 if position > 0 {
@@ -1218,22 +1473,32 @@ struct DocumentArticleReaderView: View {
                     // 使用forceUpdateUI方法强制更新UI
                     speechManager.forceUpdateUI(position: position)
                     
-                    print("设置章节内位置: \(position)/\(chapter.content.count)")
+                    print("设置章节内位置: \(position)/\(selectedArticle.content.count)")
                 }
+                
+                // 检查SpeechManager当前的播放列表状态
+                print("检查SpeechManager播放列表状态:")
+                let currentPlaylistCount = speechManager.lastPlayedArticles.count
+                print("SpeechManager播放列表文章数: \(currentPlaylistCount)")
+                if currentPlaylistCount > 0 {
+                    print("SpeechManager第一篇文章ID: \(speechManager.lastPlayedArticles.first?.id ?? UUID())")
+                    if currentPlaylistCount > 1 {
+                        print("SpeechManager最后一篇文章ID: \(speechManager.lastPlayedArticles.last?.id ?? UUID())")
+                    }
+                }
+            } else {
+                print("跳过相同文章的重复更新: \(selectedArticle.id)")
             }
-            
-            // 2. 如果没有保存的章节内位置但有文章ID的保存位置，可以依赖SpeechManager.setup
-            // 这部分逻辑在SpeechManager.setup中已经实现
-            
-            // 如果是第一章且没有进度，不需要特别处理
-            // 如果不是第一章或有进度，则需要显示"继续阅读"提示
-            if startingChapterIndex > 0 || chapterProgress > 0 || document.progress > 0 {
-                // 设置为可恢复状态，这样ArticleReaderView会显示"继续上次播放"按钮
-                // 注意：这依赖于SpeechManager.setup方法会设置isResuming标志
-                speechManager.isResuming = true
-                print("将显示\"继续阅读\"提示，章节索引: \(startingChapterIndex+1)/\(chapters.count)")
-            }
+        } else {
+            print("错误：生成的文章列表为空")
         }
+        
+        // 重置更新标志
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.isUpdatingArticle = false
+        }
+        
+        print("========= 文章列表更新完成 =========")
     }
     
     // 保存文档进度
@@ -1265,85 +1530,41 @@ struct DocumentArticleReaderView: View {
         
         // 方法1：从SpeechManager获取当前文章
         let managerCurrentArticle = speechManager.getCurrentArticle()
-        if let managerArticle = managerCurrentArticle {
-            print("从SpeechManager获取到当前文章: \(managerArticle.title)")
+        if let article = managerCurrentArticle {
+            currentPlayingArticle = article
+            print("从SpeechManager获取到当前文章: \(article.title)")
             
-            // 首先直接尝试从章节标题中提取章节号
-            let articleTitle = managerArticle.title
-            
-            // 如果是前言，直接使用第一章
-            if articleTitle == "前言" && !chapters.isEmpty {
-                currentIndex = 0
-                currentPlayingArticle = managerArticle
-                print("当前文章是前言，设置索引为0")
-            }
-            // 匹配模式 "第X章" 或 "第X章: 标题"
-            else if let range = articleTitle.range(of: "第(\\d+)章", options: .regularExpression),
-               let numEndIndex = articleTitle.range(of: "章", options: .backwards, range: range)?.lowerBound {
-                let numStartIndex = articleTitle.index(after: range.lowerBound) // 跳过"第"字
-                let numberString = articleTitle[numStartIndex..<numEndIndex]
-                
-                if let chapterNumber = Int(numberString), chapterNumber > 0, chapterNumber <= chapters.count {
-                    // 检查是否有前言，如果有前言要调整索引
-                    let hasPrologue = chapters.contains { $0.title == "前言" }
-                    currentIndex = hasPrologue ? chapterNumber : chapterNumber - 1
-                    currentPlayingArticle = managerArticle
-                    print("根据章节标题直接确定索引: \(currentIndex+1)/\(chapters.count)")
-                }
-            }
-            // 如果通过标题无法匹配，尝试通过内容匹配
-            else if let idx = speechManager.lastPlayedArticles.firstIndex(where: { $0.title == managerArticle.title }) {
-                currentPlayingArticle = managerArticle
-                currentIndex = idx
-                print("在播放列表中找到当前文章，索引: \(currentIndex+1)/\(chapters.count)")
-            }
-            // 如果通过标题无法匹配，尝试通过内容匹配
-            else {
-                // 通过比较文章内容查找匹配的章节
-                for (index, chapter) in chapters.enumerated() {
-                    if chapter.content == managerArticle.content {
-                        currentIndex = index
-                        currentPlayingArticle = managerArticle
-                        print("通过内容匹配找到章节: \(currentIndex+1)/\(chapters.count)")
-                        break
-                    }
-                }
-                
-                // 如果仍未找到匹配，但播放列表有当前的章节值，则使用第一个作为备选
-                if currentPlayingArticle == nil && !speechManager.lastPlayedArticles.isEmpty {
-                    // 在这种情况下，我们不改变currentIndex，因为无法确定正确的索引
-                    // 保持使用当前文章索引，但获取文章对象用于保存位置
-                    currentPlayingArticle = speechManager.lastPlayedArticles.first
-                    print("无法匹配章节，使用当前显示的章节索引: \(currentIndex+1)/\(chapters.count)，但使用播放列表中的第一篇文章")
-                }
-            }
-        }
-        
-        // 如果仍未找到播放文章，使用当前显示的文章
-        if currentPlayingArticle == nil {
-            currentPlayingArticle = self.currentArticle
-            
-            // 尝试从当前文章标题中提取章节号
-            let titleStr = self.currentArticle.title
-            let chapterRange = titleStr.range(of: "第(\\d+)章", options: .regularExpression)
-            if chapterRange != nil {
-                let startIndex = titleStr.index(after: chapterRange!.lowerBound) // 跳过"第"字
-                let endIndex = titleStr.firstIndex(of: "章") ?? titleStr.endIndex
-                let numberString = titleStr[startIndex..<endIndex]
+            // 尝试根据章节标题直接确定索引
+            let titleStr = article.title
+            let chapterPattern = "第(\\d+)章"
+            if let range = titleStr.range(of: chapterPattern, options: .regularExpression),
+               let chapterIndex = titleStr.firstIndex(of: "章") {
+                // 确定结束位置，优先使用冒号，否则使用"章"字符后的位置
+                let endIndex = titleStr.firstIndex(of: ":") ?? titleStr.index(after: chapterIndex)
+                let startIndex = titleStr.index(after: range.lowerBound) // 跳过"第"字符
+                let numberString = titleStr[startIndex..<endIndex].trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "章", with: "").replacingOccurrences(of: ":", with: "")
                 
                 if let chapterNumber = Int(numberString), chapterNumber > 0, chapterNumber <= chapters.count {
                     currentIndex = chapterNumber - 1
-                    print("使用当前显示的文章，根据标题确定章节索引: \(currentIndex+1)/\(chapters.count)")
+                    print("根据章节标题直接确定索引: \(currentIndex+1)/\(chapters.count)")
                 }
-            } else {
-                print("使用当前显示的文章，保持章节索引: \(currentIndex+1)/\(chapters.count)")
+            }
+            
+            // 如果无法通过标题确定，尝试通过ID查找
+            if currentIndex == 0 {
+                if let index = chapters.firstIndex(where: { $0.id == article.id }) {
+                    currentIndex = index
+                    print("根据文章ID找到章节索引: \(currentIndex+1)/\(chapters.count)")
+                }
             }
         }
         
-        // 确保索引不超出章节范围
-        if currentIndex >= chapters.count {
-            print("警告：当前章节索引(\(currentIndex))超出章节范围(0-\(chapters.count-1))")
-            currentIndex = chapters.count - 1
+        // 保存当前文章ID到UserDefaults，确保下次打开时使用相同的文章
+        if let currentArticle = currentPlayingArticle {
+            // 保存章节ID到UserDefaults
+            let chapterIdKey = "lastChapterId_\(document.id.uuidString)"
+            UserDefaults.standard.set(currentArticle.id.uuidString, forKey: chapterIdKey)
+            print("保存章节ID: \(currentArticle.id)")
         }
         
         // 计算文档总字符数
@@ -1427,9 +1648,8 @@ struct DocumentArticleReaderView: View {
                     title = "前言"
                 } else {
                     // 普通章节添加章节编号
-                    // 如果有前言，则章节序号-1，保持与原文一致
-                    let hasPrologue = self.chapterManager.chapters.contains { $0.title == "前言" }
-                    let chapterNumber = hasPrologue ? index : index + 1
+                    // 尝试从章节标题中提取编号
+                    let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : self.chapterManager.chapters.firstIndex(of: chapter)! + 1
                     title = "第\(chapterNumber)章: \(chapter.title)"
                 }
                 

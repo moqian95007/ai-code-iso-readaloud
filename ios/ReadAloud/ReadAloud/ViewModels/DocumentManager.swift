@@ -29,73 +29,108 @@ class DocumentManager: ObservableObject {
             let fileType = try url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
             print("文件类型: \(fileType ?? "未知")")
             
-            if let fileTypeString = fileType {
-                let documentText: String
-                let fileExtension: String
-                
-                // 处理不同格式的文档
-                if fileTypeString == UTType.plainText.identifier {
-                    // 处理纯文本文件
-                    print("处理TXT文件")
-                    documentText = try importTextFile(url: url)
-                    fileExtension = "txt"
-                } else if fileTypeString == UTType.pdf.identifier {
-                    // 处理PDF文件
-                    print("处理PDF文件")
-                    documentText = try importPDFFile(url: url)
-                    fileExtension = "pdf"
-                } else if fileTypeString == UTType.rtf.identifier {
-                    // 处理RTF文件
-                    print("处理RTF文件")
-                    documentText = try importRTFFile(url: url)
-                    fileExtension = "rtf"
-                } else if fileTypeString == UTType.epub.identifier || fileTypeString == "org.idpf.epub-container" {
-                    // 处理EPUB文件
-                    print("处理EPUB文件")
-                    documentText = try importEPUBFile(url: url)
-                    fileExtension = "epub"
-                } else if let mobiType = UTType(filenameExtension: "mobi")?.identifier, fileTypeString == mobiType {
-                    // 处理MOBI文件
-                    print("处理MOBI文件")
-                    documentText = try importMOBIFile(url: url)
-                    fileExtension = "mobi"
-                } else {
-                    print("不支持的文件类型: \(fileTypeString)")
-                    throw NSError(domain: "DocumentManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "不支持的文件类型"])
+            var content: String
+            var title = url.lastPathComponent
+            var actualFileType = "txt" // 默认文件类型
+            
+            // 读取文件内容
+            if let type = fileType {
+                switch type {
+                case "public.plain-text", "public.text":
+                    // TXT文件
+                    content = try importTextFile(url: url)
+                    actualFileType = "txt"
+                    
+                case "com.adobe.pdf", "public.pdf":
+                    // PDF文件
+                    content = try importPDFFile(url: url)
+                    actualFileType = "pdf"
+                    
+                case "public.rtf", "com.apple.rtf", "com.apple.rtfd":
+                    // RTF文件
+                    content = try importRTFFile(url: url)
+                    actualFileType = "rtf"
+                    
+                case "org.idpf.epub-container", "com.apple.ibooks.epub":
+                    // EPUB文件
+                    content = try importEPUBFile(url: url)
+                    actualFileType = "epub"
+                    
+                default:
+                    if type.contains("mobi") {
+                        // MOBI文件
+                        content = try importMOBIFile(url: url)
+                        actualFileType = "mobi"
+                    } else {
+                        // 尝试作为文本文件处理
+                        content = try importTextFile(url: url)
+                        actualFileType = "txt"
+                    }
                 }
-                
-                // 提取文件名作为标题
-                let fileNameWithoutExtension = url.deletingPathExtension().lastPathComponent
-                print("文件名: \(fileNameWithoutExtension)")
-                
-                // 检查是否成功获取文本
-                if documentText.isEmpty {
-                    print("警告: 提取的文本内容为空")
-                } else {
-                    print("成功提取文本内容，长度: \(documentText.count)字符")
-                }
-                
-                // 添加到文档库
-                documentLibrary.addDocument(
-                    title: fileNameWithoutExtension,
-                    content: documentText,
-                    fileType: fileExtension
-                )
-                
-                print("文档已添加到文档库")
-                
-                // 直接刷新文档列表而不是发送通知
-                DispatchQueue.main.async {
-                    // 确保在添加后刷新文档列表，这样就能立即显示
-                    print("导入成功后直接刷新文档列表")
-                    self.documentLibrary.loadDocuments()
-                }
-                
-                return true
+            } else {
+                // 尝试作为文本文件处理
+                content = try importTextFile(url: url)
+                actualFileType = "txt"
             }
-            return false
+            
+            // 安全检查：确保内容非空
+            if content.isEmpty {
+                content = "（导入的文档内容为空）"
+            }
+            
+            // 提取文件名作为标题
+            let fileNameWithoutExtension = url.deletingPathExtension().lastPathComponent
+            print("文件名: \(fileNameWithoutExtension)")
+            
+            // 第一阶段：在主线程上快速添加文档到库中，确保UI可以立即更新
+            let newDocument = Document(
+                title: fileNameWithoutExtension,
+                content: content,
+                fileType: actualFileType,
+                createdAt: Date()
+            )
+            
+            DispatchQueue.main.async {
+                // 添加文档到数组（不调用saveDocuments以避免额外开销）
+                self.documentLibrary.documents.append(newDocument)
+                
+                // 立即通知UI更新
+                self.documentLibrary.refreshDocumentList()
+                print("第一阶段：文档已添加到库中并通知UI刷新")
+                
+                // 第二阶段：在后台处理保存和章节识别等耗时操作
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // 读取数据并准备信息（此处不修改任何发布属性）
+                    // 保存到UserDefaults - 这需要移到主线程
+                    DispatchQueue.main.async {
+                        self.documentLibrary.saveDocuments()
+                        print("第二阶段：保存文档到UserDefaults完成")
+                    }
+                    
+                    print("获取到最新添加的文档: \(newDocument.title), ID=\(newDocument.id.uuidString)")
+                    
+                    // 添加文档的章节识别功能
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        print("开始识别文档章节: \(newDocument.title)")
+                        let chapterManager = ChapterManager()
+                        let chapters = chapterManager.identifyChapters(for: newDocument)
+                        print("文档章节识别完成")
+                        
+                        // 标记文档为已处理 - 通知必须在主线程发送
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("DocumentChapterProcessingCompleted"),
+                                object: nil,
+                                userInfo: ["documentId": newDocument.id]
+                            )
+                        }
+                    }
+                }
+            }
+            
+            return true
         } catch {
-            print("文档导入错误: \(error.localizedDescription)")
+            print("导入文档失败: \(error.localizedDescription)")
             return false
         }
     }
@@ -185,20 +220,50 @@ class DocumentManager: ObservableObject {
         throw NSError(domain: "DocumentManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法解析RTF文件内容"])
     }
     
-    // 导入EPUB文件 (基础实现，可能需要第三方库扩展功能)
+    // 导入EPUB文件
     private func importEPUBFile(url: URL) throws -> String {
-        // 由于Swift标准库没有直接支持EPUB的解析，这里提供一个基础实现
-        // 实际应用中可能需要引入第三方库如FolioReaderKit或自行解析EPUB文件
-        
-        // EPUB本质上是一个ZIP文件，包含HTML，CSS和其他资源
-        // 这里简化处理，提示用户需要进一步处理
-        return "【EPUB文件导入说明】\n\n文件名: \(url.lastPathComponent)\n\nEPUB文件导入支持正在开发中，暂时无法自动解析此文件内容。\n建议先将EPUB转换为TXT或PDF格式再导入。\n\n如果您继续使用此文件，应用将只显示此提示信息而非实际内容。"
+        do {
+            // 使用新的EBookParser解析EPUB文件
+            print("开始使用EBookParser解析EPUB文件")
+            let content = try EBookParser.parseEPUB(url: url)
+            return content
+        } catch {
+            print("EPUB解析错误: \(error.localizedDescription)")
+            
+            // 返回错误信息
+            return """
+            【EPUB文件导入错误】
+            
+            文件名: \(url.lastPathComponent)
+            
+            无法解析此EPUB文件: \(error.localizedDescription)
+            
+            请确保文件格式正确，或尝试将EPUB转换为TXT或PDF格式后再导入。
+            """
+        }
     }
     
-    // 导入MOBI文件 (同样需要第三方库)
+    // 导入MOBI文件
     private func importMOBIFile(url: URL) throws -> String {
-        // MOBI格式更复杂，同样需要专门的解析库
-        return "【MOBI文件导入说明】\n\n文件名: \(url.lastPathComponent)\n\nMOBI文件导入支持正在开发中，暂时无法自动解析此文件内容。\n建议先将MOBI转换为TXT或PDF格式再导入。\n\n如果您继续使用此文件，应用将只显示此提示信息而非实际内容。"
+        do {
+            // 使用新的EBookParser解析MOBI文件
+            print("开始使用EBookParser解析MOBI文件")
+            let content = try EBookParser.parseMOBI(url: url)
+            return content
+        } catch {
+            print("MOBI解析错误: \(error.localizedDescription)")
+            
+            // 返回错误信息
+            return """
+            【MOBI文件导入错误】
+            
+            文件名: \(url.lastPathComponent)
+            
+            无法解析此MOBI文件: \(error.localizedDescription)
+            
+            请确保文件格式正确，或尝试将MOBI转换为EPUB、TXT或PDF格式后再导入。
+            """
+        }
     }
 }
 
@@ -242,16 +307,17 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             
             print("选择的文档路径: \(url.path)")
             
-            // 先获取文件的访问权限
+            // 获取文件的安全访问权限
             let success = url.startAccessingSecurityScopedResource()
-            defer {
-                if success {
-                    url.stopAccessingSecurityScopedResource()
-                }
+            
+            // 在同一线程处理文件导入，保持安全访问范围有效
+            let result = parent.documentManager.importDocument(url: url)
+            
+            // 释放安全访问范围
+            if success {
+                url.stopAccessingSecurityScopedResource()
             }
             
-            // 导入文档
-            let result = parent.documentManager.importDocument(url: url)
             print("文档导入结果: \(result ? "成功" : "失败")")
             parent.completion(result)
         }

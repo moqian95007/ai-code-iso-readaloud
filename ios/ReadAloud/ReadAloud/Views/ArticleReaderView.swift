@@ -20,12 +20,50 @@ struct ArticleReaderView: View {
     // 用于防止重复调用playNextArticle
     private static var lastArticlePlayTime: Date = Date(timeIntervalSince1970: 0)
     
+    // 用于跟踪初始化时间，防止短时间内重复初始化
+    private static var lastInitTime: Date = Date(timeIntervalSince1970: 0)
+    private static var lastInitArticleId: UUID? = nil
+    
     // 自定义初始化方法，接收必要的依赖
     init(article: Article, selectedListId: UUID? = nil, useLastPlaylist: Bool = false, articleManager: ArticleManager) {
+        // 检查是否是短时间内对同一篇文章的重复初始化
+        let now = Date()
+        let isSameArticle = Self.lastInitArticleId == article.id
+        let isRecentInit = now.timeIntervalSince(Self.lastInitTime) < 0.3
+        
+        if isSameArticle && isRecentInit {
+            print("跳过对文章ID \(article.id) 的重复初始化 (时间间隔: \(now.timeIntervalSince(Self.lastInitTime))秒)")
+            // 继续初始化，但不打印日志
+            self._article = State(initialValue: article)
+            self.selectedListId = selectedListId
+            self.useLastPlaylist = useLastPlaylist
+            self.articleManager = articleManager
+            self._currentListArticles = State(initialValue: SpeechManager.shared.lastPlayedArticles)
+            return
+        }
+        
+        // 更新最后初始化时间和文章ID
+        Self.lastInitTime = now
+        Self.lastInitArticleId = article.id
+        
+        print("========= ArticleReaderView.init =========")
+        print("初始化文章: \(article.title), ID: \(article.id.uuidString)")
+        if let selectedListId = selectedListId {
+            print("指定播放列表ID: \(selectedListId.uuidString)")
+        } else {
+            print("未指定播放列表ID")
+        }
+        print("使用上次播放列表: \(useLastPlaylist)")
+        
         self._article = State(initialValue: article)
         self.selectedListId = selectedListId
         self.useLastPlaylist = useLastPlaylist
         self.articleManager = articleManager
+        print("====================================")
+        
+        // 初始化时尝试获取当前播放列表
+        self._currentListArticles = State(initialValue: SpeechManager.shared.lastPlayedArticles)
+        print("初始化时播放列表文章数: \(SpeechManager.shared.lastPlayedArticles.count)")
     }
     
     // 状态管理
@@ -343,17 +381,152 @@ struct ArticleReaderView: View {
                         // 发送通知告知需要更新播放列表
                         NotificationCenter.default.post(name: Notification.Name("OpenArticleList"), object: nil)
                         
-                        // 使用SpeechManager的播放列表
+                        // 添加详细ID诊断日志
+                        print("========= 章节ID诊断信息 =========")
+                        print("当前文档ID: \(article.id.uuidString)")
+                        print("当前文档标题: \(article.title)")
+                        
+                        // 获取播放列表 - 优先使用SpeechManager的lastPlayedArticles
                         currentListArticles = speechManager.lastPlayedArticles
+                        
+                        // 打印初始播放列表的ID信息
+                        print("初始播放列表包含 \(currentListArticles.count) 篇文章")
+                        print("初始播放列表文章ID详情:")
+                        for (index, article) in currentListArticles.enumerated() {
+                            let chapterNum = extractChapterNumber(from: article.title) ?? -1
+                            // print("[\(index+1)/\(currentListArticles.count)] 章节: \(article.title), ID: \(article.id.uuidString), 章节号: \(chapterNum)")
+                        }
                         
                         // 确保当前列表有文章
                         if currentListArticles.isEmpty {
-                            print("警告: 当前播放列表为空，尝试使用SpeechManager中的lastPlayedArticles")
-                            currentListArticles = speechManager.lastPlayedArticles
+                            // 如果SpeechManager的列表为空，尝试使用私有计算属性中的listArticles
+                            print("警告: 播放列表为空，尝试使用计算属性中的listArticles")
+                            currentListArticles = listArticles
+                            
+                            print("使用listArticles后，播放列表包含 \(currentListArticles.count) 篇文章")
+                            print("listArticles文章ID详情:")
+                            for (index, article) in currentListArticles.enumerated() {
+                                let chapterNum = extractChapterNumber(from: article.title) ?? -1
+                                // print("[\(index+1)/\(currentListArticles.count)] 章节: \(article.title), ID: \(article.id.uuidString), 章节号: \(chapterNum)")
+                            }
                         }
                         
-                        // 打印当前列表文章数量
+                        // 确保当前文章在列表中
+                        if !currentListArticles.contains(where: { $0.id == article.id }) {
+                            print("=== ID不匹配诊断信息 ===")
+                            print("当前文章不在播放列表中，检查是否可能是相同章节的不同对象...")
+                            print("当前文章ID: \(article.id.uuidString)")
+                            print("当前文章标题: \(article.title)")
+                            
+                            // 从当前文章标题中提取章节号
+                            let currentChapterNumber = extractChapterNumber(from: article.title)
+                            print("当前文章提取的章节号: \(currentChapterNumber ?? -1)")
+                            
+                            // 检查是否有相同章节号的文章已在列表中
+                            var existingSameChapterArticle: Article? = nil
+                            var existingSameChapterIndex: Int? = nil
+                            
+                            // 尝试查找可能匹配的文章
+                            var possibleMatches: [(index: Int, article: Article, reason: String)] = []
+                            
+                            for (index, listArticle) in currentListArticles.enumerated() {
+                                var matchReason = ""
+                                
+                                if listArticle.title == article.title {
+                                    // 标题完全匹配
+                                    matchReason = "标题完全匹配"
+                                    possibleMatches.append((index, listArticle, matchReason))
+                                    existingSameChapterArticle = listArticle
+                                    existingSameChapterIndex = index
+                                    print("找到标题完全匹配的文章：\(listArticle.title)（ID: \(listArticle.id.uuidString)）")
+                                    break
+                                } else if let currentNumber = currentChapterNumber,
+                                          let listNumber = extractChapterNumber(from: listArticle.title),
+                                          currentNumber == listNumber {
+                                    // 章节号匹配
+                                    matchReason = "章节号匹配: \(currentNumber)"
+                                    possibleMatches.append((index, listArticle, matchReason))
+                                    existingSameChapterArticle = listArticle
+                                    existingSameChapterIndex = index
+                                    print("找到章节号匹配的文章：\(listArticle.title)（ID: \(listArticle.id.uuidString)）")
+                                    break
+                                }
+                            }
+                            
+                            // 打印所有可能匹配的文章
+                            if possibleMatches.isEmpty {
+                                print("没有找到任何匹配的文章")
+                            } else {
+                                print("找到 \(possibleMatches.count) 个可能匹配的文章:")
+                                for match in possibleMatches {
+                                    print("- 索引: \(match.index+1), 标题: \(match.article.title), ID: \(match.article.id.uuidString), 匹配原因: \(match.reason)")
+                                }
+                            }
+                            
+                            // 分析内容长度是否相同
+                            if let existingArticle = existingSameChapterArticle {
+                                print("内容比较：")
+                                print("- 当前文章内容长度: \(article.content.count)")
+                                print("- 匹配文章内容长度: \(existingArticle.content.count)")
+                                
+                                if article.content.count == existingArticle.content.count {
+                                    print("内容长度完全一致")
+                                    
+                                    // 比较内容的前100个字符
+                                    let currentPrefix = article.content.prefix(100)
+                                    let existingPrefix = existingArticle.content.prefix(100)
+                                    
+                                    if currentPrefix == existingPrefix {
+                                        print("内容前缀一致，这很可能是同一篇文章的不同实例")
+                                    } else {
+                                        print("内容前缀不一致，虽然标题相同但内容不同")
+                                        print("- 当前文章前缀: \(currentPrefix)")
+                                        print("- 匹配文章前缀: \(existingPrefix)")
+                                    }
+                                } else {
+                                    print("内容长度不同，可能是不同的文章")
+                                }
+                            }
+                            
+                            if let existingArticle = existingSameChapterArticle, let existingIndex = existingSameChapterIndex {
+                                print("使用现有章节对象（ID: \(existingArticle.id.uuidString)）替换当前文章（ID: \(article.id.uuidString)）...")
+                                // 使用现有对象，而不是插入新对象
+                                self.article = existingArticle
+                                print("章节已被替换，无需修改列表")
+                            } else {
+                                print("未找到匹配的章节，按章节顺序插入当前文章")
+                                
+                                // 确定插入位置
+                                var insertIndex = currentListArticles.count // 默认插入到末尾
+                                
+                                // 如果能够提取出章节号，则寻找合适的插入位置
+                                if let currentNumber = currentChapterNumber {
+                                    print("当前文章章节号: \(currentNumber)")
+                                    
+                                    // 寻找合适的插入位置
+                                    for (index, listArticle) in currentListArticles.enumerated() {
+                                        if let listNumber = extractChapterNumber(from: listArticle.title), 
+                                           listNumber > currentNumber {
+                                            insertIndex = index
+                                            break
+                                        }
+                                    }
+                                }
+                                
+                                // 在确定的位置插入文章
+                                currentListArticles.insert(article, at: insertIndex)
+                                print("已将当前文章插入到位置 \(insertIndex+1)/\(currentListArticles.count)")
+                            }
+                        } else {
+                            print("当前文章ID已在列表中")
+                        }
+                        
+                        // 打印当前列表文章数量和状态
                         print("列表按钮 - 播放列表文章数: \(currentListArticles.count)")
+                        print("当前文章ID: \(article.id)")
+                        if let index = currentListArticles.firstIndex(where: { $0.id == article.id }) {
+                            print("当前文章在列表中的索引: \(index+1)/\(currentListArticles.count)")
+                        }
                         
                         // 显示列表弹窗
                         showArticleList = true
@@ -487,7 +660,11 @@ struct ArticleReaderView: View {
             }
         }
         .onAppear {
-            print("========= ArticleReaderView.onAppear =========")
+            print("ArticleReaderView 出现")
+            print("当前文章ID: \(article.id)")
+            
+            // 同步播放列表状态
+            self.syncPlaylistState()
             
             // 记录当前播放内容类型为文章
             UserDefaults.standard.set("article", forKey: "lastPlayedContentType")
@@ -537,10 +714,18 @@ struct ArticleReaderView: View {
             // 设置播放列表
             if useLastPlaylist {
                 print("使用上次播放列表，包含 \(speechManager.lastPlayedArticles.count) 篇文章")
+                if !speechManager.lastPlayedArticles.isEmpty {
+                    print("上次播放列表第一篇: \(speechManager.lastPlayedArticles.first?.title ?? "无"), ID: \(speechManager.lastPlayedArticles.first?.id.uuidString ?? "无")")
+                    print("上次播放列表最后一篇: \(speechManager.lastPlayedArticles.last?.title ?? "无"), ID: \(speechManager.lastPlayedArticles.last?.id.uuidString ?? "无")")
+                }
             } else {
                 // 根据所在列表设置播放上下文
                 let articlesToPlay = listArticles
                 print("设置播放列表为当前文章所在列表，包含 \(articlesToPlay.count) 篇文章")
+                if !articlesToPlay.isEmpty {
+                    print("当前列表第一篇: \(articlesToPlay.first?.title ?? "无"), ID: \(articlesToPlay.first?.id.uuidString ?? "无")")
+                    print("当前列表最后一篇: \(articlesToPlay.last?.title ?? "无"), ID: \(articlesToPlay.last?.id.uuidString ?? "无")")
+                }
                 speechManager.updatePlaylist(articlesToPlay)
                 
                 // 更新当前文章的播放列表到最近的列表
@@ -601,53 +786,64 @@ struct ArticleReaderView: View {
                     speechManager.applyNewSpeechRate()
                 }
         }
-        .sheet(isPresented: $showVoiceSelector) {
-            VoiceSelectorView(
-                selectedVoiceIdentifier: $speechManager.selectedVoiceIdentifier, 
-                showVoiceSelector: $showVoiceSelector,
-                availableVoices: availableVoices,
-                articleLanguage: article.detectLanguage()
-            )
-            .onDisappear {
-                speechManager.applyNewVoice()
-            }
+        // 使用条件创建视图方式来显示语音选择器
+        .background { // 使用背景视图来包含条件渲染的sheet
+            EmptyView() // 空视图作为背景
+                .sheet(isPresented: $showVoiceSelector) {
+                    if showVoiceSelector { // 只有当实际需要显示时才创建VoiceSelectorView
+                        VoiceSelectorView(
+                            selectedVoiceIdentifier: $speechManager.selectedVoiceIdentifier, 
+                            showVoiceSelector: $showVoiceSelector,
+                            availableVoices: availableVoices,
+                            articleLanguage: article.detectLanguage() // 现在只有在sheet实际显示时才会调用
+                        )
+                        .onDisappear {
+                            speechManager.applyNewVoice()
+                        }
+                    }
+                }
         }
         .sheet(isPresented: $showArticleList) {
+            // 添加调试日志，验证传递的ID是否正确
+            let _ = {
+                print("正在显示章节列表 - 当前文章ID: \(article.id)")
+                print("当前列表包含 \(currentListArticles.count) 个章节")
+                if let index = currentListArticles.firstIndex(where: { $0.id == article.id }) {
+                    print("当前文章在列表中的索引: \(index+1)/\(currentListArticles.count)")
+                } else {
+                    print("警告: 当前文章ID不在列表中!")
+                }
+            }()
+            
             ArticleListPopoverView(
                 articles: currentListArticles,
                 currentArticleId: article.id,
                 onSelectArticle: { selectedArticle in
-                    // 打开选中的文章
-                    if selectedArticle.id != article.id {
-                        // 改为本地切换而非发送通知
-                        // 停止当前播放
-                        if speechManager.isPlaying {
-                            speechManager.stopSpeaking(resetResumeState: true)
-                        }
-                        
-                        // 重置播放状态
-                        speechDelegate.startPosition = 0
-                        speechDelegate.wasManuallyPaused = true  // 标记为手动切换
-                        speechManager.resetPlaybackFlags()
-                        
-                        // 保存最近播放的文章ID
-                        UserDefaults.standard.set(selectedArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
-                        
-                        // 本地更新文章状态
-                        article = selectedArticle
-                        
-                        // 设置新文章到播放器
-                        speechManager.setup(for: selectedArticle)
-                        
-                        // 在setupArticleReader中增加清晰的日志记录
-                        print("列表选择章节：手动切换到新章节：\(selectedArticle.title)")
-                        
-                        // 稍后开始播放
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            // 再次确保手动切换标识被正确设置
-                            self.speechDelegate.wasManuallyPaused = true
-                            self.speechManager.startSpeaking()
-                        }
+                    print("选择了章节: \(selectedArticle.title)")
+                    
+                    // 停止当前播放
+                    if speechManager.isPlaying {
+                        speechManager.stopSpeaking(resetResumeState: true)
+                    }
+                    
+                    // 重置播放状态
+                    speechDelegate.startPosition = 0
+                    speechDelegate.wasManuallyPaused = false
+                    
+                    // 保存最近播放的文章ID
+                    UserDefaults.standard.set(selectedArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
+                    
+                    // 更新到选择的文章
+                    self.article = selectedArticle
+                    
+                    // 设置并开始播放新选择的章节
+                    speechManager.setup(for: selectedArticle)
+                    print("已切换到章节: \(selectedArticle.title)")
+                    
+                    // 延迟一点开始播放
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        print("开始播放章节: \(selectedArticle.title)")
+                        speechManager.startSpeaking()
                     }
                 },
                 isPresented: $showArticleList
@@ -659,23 +855,31 @@ struct ArticleReaderView: View {
         .background(themeManager.backgroundColor())
         .foregroundColor(themeManager.foregroundColor())
         .preferredColorScheme(themeManager.isDarkMode ? .dark : .light)
-        .alert("提示", isPresented: $showVoiceLanguageError) {
-            Button("确定", role: .cancel) { }
-        } message: {
-            let languageNames = [
-                "zh": "中文",
-                "en": "英文",
-                "ja": "日文",
-                "ko": "韩文",
-                "fr": "法文",
-                "de": "德文",
-                "es": "西班牙文",
-                "it": "意大利文",
-                "ru": "俄文"
-            ]
-            let articleLanguage = article.detectLanguage()
-            let languageName = languageNames[articleLanguage] ?? articleLanguage
-            Text("请选择\(languageName)主播朗读\(languageName)文章")
+        // 使用条件创建方式显示语言错误警报
+        .background { // 使用背景视图来包含条件渲染的alert
+            EmptyView()
+                .alert("提示", isPresented: $showVoiceLanguageError) {
+                    Button("确定", role: .cancel) { }
+                } message: {
+                    if showVoiceLanguageError { // 仅在实际显示警报时才计算语言
+                        let languageNames = [
+                            "zh": "中文",
+                            "en": "英文",
+                            "ja": "日文",
+                            "ko": "韩文",
+                            "fr": "法文",
+                            "de": "德文",
+                            "es": "西班牙文",
+                            "it": "意大利文",
+                            "ru": "俄文"
+                        ]
+                        let articleLanguage = article.detectLanguage()
+                        let languageName = languageNames[articleLanguage] ?? articleLanguage
+                        return Text("请选择\(languageName)主播朗读\(languageName)文章")
+                    } else {
+                        return Text("")
+                    }
+                }
         }
     }
     
@@ -920,7 +1124,18 @@ struct ArticleReaderView: View {
     private func playNextArticle() {
         print("========= ArticleReaderView.playNextArticle =========")
         print("当前文章: \(article.title)")
+        print("当前文章ID: \(article.id)")
         print("列表文章数量: \(currentListArticles.count)")
+        
+        // 打印当前播放列表中所有文章的ID
+        if !currentListArticles.isEmpty {
+            print("播放列表中的所有文章ID:")
+            for (index, listArticle) in currentListArticles.enumerated() {
+                print("[\(index)] \(listArticle.title) - ID: \(listArticle.id)")
+            }
+        } else {
+            print("播放列表为空")
+        }
         
         // 防止重复快速处理
         let now = Date()
@@ -975,7 +1190,7 @@ struct ArticleReaderView: View {
             
             // 在列表循环模式下，直接播放下一篇文章，即使循环到自己
             let nextArticle = currentListArticles[nextIndex]
-            print("下一篇文章: \(nextArticle.title)")
+            print("下一篇文章: \(nextArticle.title), ID: \(nextArticle.id)")
             
             // 关键修改: 不再发送通知，直接在本地更新文章状态
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1001,10 +1216,11 @@ struct ArticleReaderView: View {
             }
         } else {
             print("当前文章不在列表中，尝试使用第一篇文章")
+            print("当前文章ID: \(article.id)")
             
             // 如果当前文章不在列表中，尝试播放列表的第一篇文章
             if let firstArticle = currentListArticles.first {
-                print("播放列表的第一篇文章: \(firstArticle.title)")
+                print("播放列表的第一篇文章: \(firstArticle.title), ID: \(firstArticle.id)")
                 
                 // 添加延迟以确保状态已重置
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1040,7 +1256,18 @@ struct ArticleReaderView: View {
     private func playPreviousArticle() {
         print("========= ArticleReaderView.playPreviousArticle =========")
         print("当前文章: \(article.title)")
+        print("当前文章ID: \(article.id)")
         print("列表文章数量: \(currentListArticles.count)")
+        
+        // 打印当前播放列表中所有文章的ID
+        if !currentListArticles.isEmpty {
+            print("播放列表中的所有文章ID:")
+            for (index, listArticle) in currentListArticles.enumerated() {
+                print("[\(index)] \(listArticle.title) - ID: \(listArticle.id)")
+            }
+        } else {
+            print("播放列表为空")
+        }
         
         // 防止重复快速处理
         let now = Date()
@@ -1095,7 +1322,7 @@ struct ArticleReaderView: View {
             
             // 获取上一篇文章
             let previousArticle = currentListArticles[previousIndex]
-            print("上一篇文章: \(previousArticle.title)")
+            print("上一篇文章: \(previousArticle.title), ID: \(previousArticle.id)")
             
             // 关键修改: 不再发送通知，直接在本地更新文章状态
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1124,7 +1351,7 @@ struct ArticleReaderView: View {
             
             // 如果当前文章不在列表中，尝试播放列表的最后一篇文章
             if let lastArticle = currentListArticles.last {
-                print("播放列表的最后一篇文章: \(lastArticle.title)")
+                print("播放列表的最后一篇文章: \(lastArticle.title), ID: \(lastArticle.id)")
                 
                 // 添加延迟以确保状态已重置
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1154,5 +1381,66 @@ struct ArticleReaderView: View {
         }
         
         print("=================================================")
+    }
+    
+    // 从文章标题中提取章节号
+    private func extractChapterNumber(from title: String) -> Int? {
+        // 支持多种章节标题格式
+        // 例如：第33章、第33章 证实、33章、Chapter 33 等
+        let patterns = [
+            "第(\\d+)章", // 匹配"第33章"
+            "第(\\d+)回", // 匹配"第33回"
+            "Chapter (\\d+)", // 匹配"Chapter 33"
+            "(\\d+)章", // 匹配"33章"
+            "章(\\d+)", // 匹配"章33"
+            "^(\\d+)\\s" // 匹配以数字开头的标题
+        ]
+        
+        for pattern in patterns {
+            do {
+                let regex = try NSRegularExpression(pattern: pattern, options: [])
+                let nsString = title as NSString
+                let results = regex.matches(in: title, options: [], range: NSRange(location: 0, length: nsString.length))
+                
+                if let match = results.first, match.numberOfRanges > 1 {
+                    let numberRange = match.range(at: 1)
+                    let numberString = nsString.substring(with: numberRange)
+                    return Int(numberString)
+                }
+            } catch {
+                print("正则表达式错误: \(error)")
+            }
+        }
+        
+        return nil
+    }
+    
+    // 同步播放列表状态
+    private func syncPlaylistState() {
+        print("同步播放列表状态")
+        
+        // 获取当前SpeechManager中的播放列表
+        let managerList = speechManager.lastPlayedArticles
+        
+        // 更新当前视图中的播放列表
+        if managerList.count > 0 {
+            self.currentListArticles = managerList
+            print("从SpeechManager更新播放列表，文章数: \(managerList.count)")
+            
+            // 打印列表中的文章ID
+            // print("播放列表中的文章ID:")
+            // for (index, article) in managerList.enumerated() {
+            //     print("[\(index)] \(article.title) - ID: \(article.id)")
+            // }
+            
+            // 检查当前文章是否在列表中
+            if let index = managerList.firstIndex(where: { $0.id == article.id }) {
+                print("当前文章在播放列表中，索引: \(index)")
+            } else {
+                print("警告: 当前文章不在播放列表中")
+            }
+        } else {
+            print("警告: SpeechManager中的播放列表为空")
+        }
     }
 } 

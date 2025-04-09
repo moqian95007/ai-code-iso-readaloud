@@ -114,6 +114,18 @@ class ArticleListManager: ObservableObject, ArticleListManaging {
     
     // 将文章添加到列表
     func addArticleToList(articleId: UUID, listId: UUID) {
+        // 确保在主线程上执行UI更新操作
+        if Thread.isMainThread {
+            self.performAddArticleToList(articleId: articleId, listId: listId)
+        } else {
+            DispatchQueue.main.async {
+                self.performAddArticleToList(articleId: articleId, listId: listId)
+            }
+        }
+    }
+    
+    // 实际执行添加文章到列表的操作（在主线程上调用）
+    private func performAddArticleToList(articleId: UUID, listId: UUID) {
         if let index = lists.firstIndex(where: { $0.id == listId }) {
             // 确保不重复添加
             if !lists[index].articleIds.contains(articleId) {
@@ -125,6 +137,18 @@ class ArticleListManager: ObservableObject, ArticleListManaging {
     
     // 从列表中移除文章
     func removeArticleFromList(articleId: UUID, listId: UUID) {
+        // 确保在主线程上执行UI更新操作
+        if Thread.isMainThread {
+            self.performRemoveArticleFromList(articleId: articleId, listId: listId)
+        } else {
+            DispatchQueue.main.async {
+                self.performRemoveArticleFromList(articleId: articleId, listId: listId)
+            }
+        }
+    }
+    
+    // 实际执行从列表中移除文章的操作（在主线程上调用）
+    private func performRemoveArticleFromList(articleId: UUID, listId: UUID) {
         if let index = lists.firstIndex(where: { $0.id == listId }) {
             lists[index].articleIds.removeAll(where: { $0 == articleId })
             saveLists()

@@ -8,6 +8,9 @@ struct Article: Identifiable, Codable, TextContent {
     var createdAt: Date
     var listId: UUID? // 添加所属列表ID
     
+    // 添加静态语言缓存字典，使用文章ID作为键
+    private static var languageCache: [UUID: String] = [:]
+    
     // 用于显示创建时间的格式化字符串
     var formattedDate: String {
         let formatter = DateFormatter()
@@ -18,8 +21,14 @@ struct Article: Identifiable, Codable, TextContent {
     
     // 获取内容预览方法已移至 TextContent 协议实现
     
-    // 检测文章语言
+    // 检测文章语言，添加缓存功能
     func detectLanguage() -> String {
+        // 先检查缓存，如果有则直接返回
+        if let cachedLanguage = Article.languageCache[id] {
+            print("使用缓存的语言检测结果: \(cachedLanguage)")
+            return cachedLanguage
+        }
+        
         // 如果文章内容为空或者太短，直接返回默认语言
         if content.isEmpty || content.count < 5 {
             return "zh" // 默认返回中文
@@ -41,7 +50,10 @@ struct Article: Identifiable, Codable, TextContent {
               let confidence = hypotheses[dominantLanguage]
         else {
             print("语言检测失败，使用默认中文")
-            return "zh" // 默认返回中文
+            let defaultLanguage = "zh"
+            // 缓存结果
+            Article.languageCache[id] = defaultLanguage
+            return defaultLanguage // 默认返回中文
         }
         
         // 输出详细的语言识别信息
@@ -61,13 +73,17 @@ struct Article: Identifiable, Codable, TextContent {
             if let enConfidence = hypotheses.first(where: { $0.key.rawValue.starts(with: "en") })?.value,
                enConfidence > 0.3 { // 英文的置信度超过30%
                 print("修正语言识别结果：从中文修正为英文，英文置信度: \(enConfidence)")
-                return "en"
+                let result = "en"
+                Article.languageCache[id] = result
+                return result
             }
             
             // 如果英文字符超过85%，直接判断为英文
             if englishRatio > 0.85 {
                 print("英文字符比例超过85%，强制判断为英文")
-                return "en"
+                let result = "en"
+                Article.languageCache[id] = result
+                return result
             }
         }
         
@@ -78,13 +94,29 @@ struct Article: Identifiable, Codable, TextContent {
             // 如果英文字符比例高，则可能是英文
             if englishRatio > 0.7 {
                 print("英文字符比例高，判断为英文")
-                return "en"
+                let result = "en"
+                Article.languageCache[id] = result
+                return result
             }
             
             // 默认使用中文
-            return "zh"
+            let result = "zh"
+            Article.languageCache[id] = result
+            return result
         }
         
-        return dominantLanguage.rawValue
+        let result = dominantLanguage.rawValue
+        Article.languageCache[id] = result
+        return result
+    }
+    
+    // 清除某个文章的语言缓存
+    static func clearLanguageCache(for articleId: UUID) {
+        languageCache.removeValue(forKey: articleId)
+    }
+    
+    // 清除所有语言缓存
+    static func clearAllLanguageCache() {
+        languageCache.removeAll()
     }
 } 

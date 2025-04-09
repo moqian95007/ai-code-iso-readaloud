@@ -78,8 +78,9 @@ class SpeechManager: ObservableObject {
     func isArticlePlaying(articleId: UUID) -> Bool {
         print("检查文章ID: \(articleId) 是否在播放")
         
-        // 首先检查合成器是否在朗读
-        let isSynthesizerSpeaking = synthesizer.isSpeaking
+        // 获取合成器的实际播放状态，考虑暂停状态
+        let isSynthesizerSpeaking = getSpeakingState()
+        print("合成器实际播放状态: \(isSynthesizerSpeaking)")
         
         // 如果合成器不在朗读，快速返回false
         if !isSynthesizerSpeaking {
@@ -96,7 +97,14 @@ class SpeechManager: ObservableObject {
         // 1. 首先检查UUID是否精确匹配
         let isIdMatched = currentArticle.id == articleId
         
-        // 2. 如果UUID不匹配，尝试通过章节号匹配
+        // 2. 检查是否是文档ID匹配（Document.id 与 Article.listId 匹配）
+        let isDocumentMatched = currentArticle.listId == articleId
+        if isDocumentMatched {
+            print("文档ID匹配成功: 当前文章的listId与检查ID匹配")
+            return true
+        }
+        
+        // 3. 如果ID不匹配，尝试通过章节号匹配
         var isChapterMatched = false
         
         // 提取章节编号的匹配模式，如 "第13章"
@@ -135,10 +143,10 @@ class SpeechManager: ObservableObject {
             }
         }
         
-        print("当前文章ID: \(currentArticle.id), 检查ID: \(articleId), ID匹配: \(isIdMatched), 章节匹配: \(isChapterMatched), 合成器状态: \(isSynthesizerSpeaking)")
+        print("当前文章ID: \(currentArticle.id), 检查ID: \(articleId), ID匹配: \(isIdMatched), 文档匹配: \(isDocumentMatched), 章节匹配: \(isChapterMatched), 合成器状态: \(isSynthesizerSpeaking)")
         
-        // 返回是否在播放这篇文章（ID匹配或章节号匹配）
-        return (isIdMatched || isChapterMatched) && isSynthesizerSpeaking
+        // 返回是否在播放这篇文章（ID匹配、文档匹配或章节匹配）
+        return (isIdMatched || isDocumentMatched || isChapterMatched) && isSynthesizerSpeaking
     }
     
     // 计时器
@@ -467,64 +475,71 @@ class SpeechManager: ObservableObject {
         print("=====================================")
     }
     
-    // 初始化设置
+    // 为新文章准备语音合成器
     func setup(for article: Article) {
-        // 如果是同一篇文章，保持当前状态
-        if currentArticle?.id == article.id {
-            return
-        }
+        print("========= SpeechManager.setup =========")
+        print("设置文章: \(article.title)")
+        print("文章ID: \(article.id.uuidString)")
+        print("内容长度: \(article.content.count)")
         
-        // 如果是新文章，重置所有状态
-        currentArticle = article
-        currentText = article.content
+        // 保存当前文章引用
+        self.currentArticle = article
+        self.currentText = article.content
         
-        // 计算总时长估计值 (按照每分钟300个汉字的朗读速度估算)
-        let wordsCount = Double(currentText.count)
-        totalTime = wordsCount / 5.0  // 每秒朗读5个字
+        // 更新UI显示的状态
+        self.currentProgress = 0.0
+        self.currentTime = 0.0
         
-        // 重置播放状态
-        isPlaying = false
-        currentProgress = 0.0
-        currentTime = 0.0
+        // 估算总时长 - 基于中文平均朗读速度约为每分钟200个字
+        // 考虑语速，selectedRate 1.0 是正常速度
+        let wordsPerMinute = 200.0 * selectedRate
+        let estimatedMinutes = Double(article.content.count) / wordsPerMinute
+        self.totalTime = estimatedMinutes * 60.0
         
-        // 获取保存的播放位置
-        if let articleId = currentArticle?.id {
-            let savedPosition = UserDefaults.standard.integer(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
-            let savedProgress = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastProgress(for: articleId))
-            let savedTime = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
-            let wasPlaying = UserDefaults.standard.bool(forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+        // 更新播放位置信息
+        self.currentPlaybackPosition = 0
+        
+        // 检查是否需要恢复上次的播放进度
+        let lastPlayedArticleId = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastPlayedArticleId)
+        if let lastArticleIdStr = lastPlayedArticleId,
+           let lastArticleId = UUID(uuidString: lastArticleIdStr),
+           lastArticleId == article.id {
             
-            // 检查保存的位置是否有效且在文本范围内
-            if savedPosition > 0 && savedPosition < currentText.count {
-                currentPlaybackPosition = savedPosition
-                isResuming = true  // 设置为恢复状态，这样UI会显示"继续朗读"按钮
+            print("检测到需要恢复上次播放进度")
+            print("上次播放的文章ID: \(lastArticleIdStr)")
+            
+            // 读取保存的播放位置
+            let savedPosition = UserDefaults.standard.integer(forKey: UserDefaultsKeys.lastPlaybackPosition(for: lastArticleId))
+            let savedProgress = UserDefaults.standard.double(forKey: UserDefaultsKeys.lastProgress(for: lastArticleId))
+            let isFromListRepeat = UserDefaults.standard.bool(forKey: UserDefaultsKeys.isFromListRepeat)
+            
+            print("保存的播放位置: \(savedPosition)")
+            print("保存的播放进度: \(savedProgress)")
+            print("是否来自列表循环模式: \(isFromListRepeat)")
+            
+            // 如果位置有效且不是从列表循环模式跳转过来的
+            if savedPosition > 0 && !isFromListRepeat {
+                self.currentPlaybackPosition = min(savedPosition, article.content.count - 1)
+                self.currentProgress = min(savedProgress, 1.0)
+                self.isResuming = true
                 
-                // 更新进度条和时间显示
-                currentProgress = savedProgress > 0 ? savedProgress : Double(savedPosition) / Double(currentText.count)
-                currentTime = savedTime > 0 ? savedTime : totalTime * currentProgress
+                // 根据位置计算当前时间
+                self.currentTime = self.totalTime * self.currentProgress
                 
-                // 强制更新UI状态
-                forceUpdateUI(position: savedPosition)
-                
-                print("恢复播放位置: \(savedPosition)/\(currentText.count), 进度: \(Int(currentProgress * 100))%")
+                print("恢复播放位置到: \(self.currentPlaybackPosition)，进度: \(self.currentProgress * 100)%")
             } else {
-                // 如果没有有效的保存位置，重置位置
-                currentPlaybackPosition = 0
-                isResuming = false
-                
-                // 重置语音代理状态
-                speechDelegate.startPosition = 0
-                speechDelegate.highlightRange = NSRange(location: 0, length: 0)
+                self.isResuming = false
+                print("放弃恢复进度，从头开始播放")
+                // 重置恢复标志
+                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.isFromListRepeat)
             }
         } else {
-            // 新文章，没有历史记录
-            currentPlaybackPosition = 0
-            isResuming = false
-            
-            // 重置语音代理状态
-            speechDelegate.startPosition = 0
-            speechDelegate.highlightRange = NSRange(location: 0, length: 0)
+            self.isResuming = false
+            print("无需恢复进度，从头开始播放")
         }
+        
+        print("设置完成，总时长估计: \(formatTime(totalTime))")
+        print("===================================")
     }
     
     // 获取选择的语音对象
@@ -1433,6 +1448,65 @@ class SpeechManager: ObservableObject {
     
     // 获取合成器当前状态
     func getSynthesizerStatus() -> Bool {
+        // 主要状态检查：检查合成器是否真正在播放
+        let isSpeaking = synthesizer.isSpeaking
+        let isPaused = synthesizer.isPaused
+        
+        // 更可靠的合成器状态检测：如果合成器处于暂停状态，则不应该被认为是在播放
+        let actualSpeakingState = isSpeaking && !isPaused
+        
+        // 添加更多日志信息，包括详细的状态信息
+        if let currentArticle = currentArticle {
+            print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+        } else {
+            print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 没有当前文章")
+        }
+        
+        // 如果合成器正在朗读，但UI状态不同步，记录额外信息帮助调试
+        if actualSpeakingState && !isPlaying {
+            if let currentArticle = currentArticle {
+                print("状态不一致 - 合成器正在朗读但UI显示为暂停，当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
+                
+                // 更新本地状态
+                isPlaying = true
+                self.objectWillChange.send()
+                
+                // 更新全局播放状态
+                let contentType: PlaybackContentType = currentArticle.id.description.hasPrefix("doc-") ? .document : .article
+                playbackManager.startPlayback(contentId: currentArticle.id, title: currentArticle.title, type: contentType)
+            } else {
+                print("状态不一致 - 合成器正在朗读但UI显示为暂停，且没有当前文章")
+            }
+        } else if !actualSpeakingState && isPlaying {
+            // 如果合成器已停止但UI状态仍为播放，同样更新
+            print("状态不一致 - 合成器已停止但UI仍显示为播放")
+            
+            // 更新本地状态
+            isPlaying = false
+            self.objectWillChange.send()
+            
+            // 更新全局播放状态
+            playbackManager.stopPlayback()
+        } else {
+            // 确保全局状态与本地状态一致
+            if let currentArticle = currentArticle {
+                if isPlaying != playbackManager.isPlaying {
+                    print("本地与全局状态不一致，正在同步 - 本地: \(isPlaying), 全局: \(playbackManager.isPlaying)")
+                    if isPlaying {
+                        let contentType: PlaybackContentType = currentArticle.id.description.hasPrefix("doc-") ? .document : .article
+                        playbackManager.startPlayback(contentId: currentArticle.id, title: currentArticle.title, type: contentType)
+                    } else {
+                        playbackManager.stopPlayback()
+                    }
+                }
+            }
+        }
+        
+        return actualSpeakingState
+    }
+    
+    // 获取合成器的实际播放状态
+    private func getSpeakingState() -> Bool {
         // 主要状态检查：检查合成器是否真正在播放
         let isSpeaking = synthesizer.isSpeaking
         let isPaused = synthesizer.isPaused

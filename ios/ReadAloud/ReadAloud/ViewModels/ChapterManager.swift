@@ -24,6 +24,7 @@ class ChapterManager: ObservableObject {
         if let existingChapters = loadChapters(for: document.id), !existingChapters.isEmpty {
             print("已存在章节划分，快速加载已有章节数据: \(existingChapters.count)个章节")
             
+            // 在主线程更新@Published属性
             DispatchQueue.main.async {
                 self.chapters = existingChapters
                 self.isProcessing = false
@@ -43,31 +44,33 @@ class ChapterManager: ObservableObject {
         let startTime = Date()
         
         // 检查文档内容是否为空
-        if document.content.isEmpty {
-            print("文档内容为空，创建空章节")
-            let emptyChapter = createDefaultChapter(content: "（文档内容为空）", documentId: document.id)
+        guard !document.content.isEmpty else {
+            print("警告: 文档内容为空，无法进行章节识别")
             
+            // 在主线程更新@Published属性
             DispatchQueue.main.async {
-                self.chapters = [emptyChapter]
+                self.chapters = []
                 self.isProcessing = false
                 self.progressPercentage = 100
-                self.processingTimeInSeconds = 0
             }
             
-            return [emptyChapter]
+            return []
         }
+        
+        // 临时变量，用于避免直接访问self的@Published属性
+        var localProgressPercentage: Double = 0
+        var isTimeout = false
+        let timeoutInterval: TimeInterval = 60 // 设置超时时间为60秒
         
         print("开始识别文档章节 - 解析内容中...")
         let content = document.content
         
         // 设置超时计时器
-        var isTimeout = false
-        let timeoutDuration: TimeInterval = 30.0 // 30秒超时
         let timeoutWorkItem = DispatchWorkItem {
             isTimeout = true
             print("章节处理超时！创建默认章节")
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutDuration, execute: timeoutWorkItem)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutInterval, execute: timeoutWorkItem)
         
         // 章节识别正则表达式 - 优化正则表达式以减少匹配次数
         let patterns = [
@@ -78,8 +81,8 @@ class ChapterManager: ObservableObject {
         ]
         
         // 针对大文件优化方案
-        let isLargeFile = content.count > 1000000 // 超过1MB的文档
-        let chunkSize = isLargeFile ? 100000 : content.count // 大文件分块处理，每次10万字符
+        let isLargeFile = content.count > 500000 // 降低大文件阈值（原来是1000000）
+        let chunkSize = isLargeFile ? 300000 : content.count // 大文件分块处理，每次30万字符（原来是10万）
         
         // 优化：合并正则表达式
         let combinedPattern = patterns.joined(separator: "|")
@@ -87,7 +90,7 @@ class ChapterManager: ObservableObject {
         
         print("编译正则表达式...")
         do {
-            regex = try NSRegularExpression(pattern: combinedPattern, options: [])
+            regex = try NSRegularExpression(pattern: combinedPattern, options: [.anchorsMatchLines]) // 添加行锚点选项以提高匹配效率
             print("正则表达式编译成功")
         } catch {
             print("正则表达式编译错误: \(error.localizedDescription)")
@@ -134,7 +137,10 @@ class ChapterManager: ObservableObject {
                     
                     // 确保不会在单词中间切断
                     if offset > 0 {
-                        while chunkStart < chunkEnd && !CharacterSet.newlines.contains(content[chunkStart].unicodeScalars.first!) {
+                        let maxLookback = min(100, content.distance(from: chunkStart, to: chunkEnd))
+                        let lookbackLimit = content.index(chunkStart, offsetBy: maxLookback, limitedBy: chunkEnd) ?? chunkEnd
+                        
+                        while chunkStart < lookbackLimit && !CharacterSet.newlines.contains(content[chunkStart].unicodeScalars.first!) {
                             chunkStart = content.index(after: chunkStart)
                         }
                     }
@@ -152,13 +158,14 @@ class ChapterManager: ObservableObject {
                             chapterPositions.append((title: title, start: startIndex))
                         }
                         
-                        // 更新进度
+                        // 更新进度 - 减少更新频率
                         let blockProgress = Double(offset + matches.count) / Double(totalLength) * 100
                         let progress = min(50.0, blockProgress) // 正则处理占进度的50%
-                        if index % 10 == 0 || index == matches.count - 1 {
+                        if index % 50 == 0 || index == matches.count - 1 { // 原来是10，现在是50
+                            localProgressPercentage = progress
                             DispatchQueue.main.async {
-                                self.progressPercentage = progress
-                                if index % 20 == 0 {
+                                self.progressPercentage = localProgressPercentage
+                                if index % 100 == 0 { // 原来是20，现在是100
                                     print("分块正则匹配进度: \(Int(progress))% (处理了\(offset)/\(totalLength)字符)")
                                 }
                             }
@@ -166,12 +173,15 @@ class ChapterManager: ObservableObject {
                     }
                     
                     offset = endOffset
-                    // 更新处理进度
+                    // 更新处理进度 - 减少更新频率
                     processedLength = offset
                     let progress = min(50.0, Double(processedLength) / Double(totalLength) * 50.0)
-                    DispatchQueue.main.async {
-                        self.progressPercentage = progress
-                        print("文件处理进度: \(Int(progress))% (处理了\(processedLength)/\(totalLength)字符)")
+                    if processedLength % 500000 == 0 || processedLength >= totalLength { // 每处理50万字符才更新一次UI
+                        localProgressPercentage = progress
+                        DispatchQueue.main.async {
+                            self.progressPercentage = localProgressPercentage
+                            print("文件处理进度: \(Int(progress))% (处理了\(processedLength)/\(totalLength)字符)")
+                        }
                     }
                 }
             } else {
@@ -191,12 +201,13 @@ class ChapterManager: ObservableObject {
                         chapterPositions.append((title: title, start: startIndex))
                     }
                     
-                    // 更新进度
+                    // 更新进度 - 减少更新频率
                     let progress = Double(index) / Double(max(1, matches.count)) * 50 // 正则处理占进度的50%
-                    if index % 10 == 0 || index == matches.count - 1 { // 减少更新频率
+                    if index % 50 == 0 || index == matches.count - 1 { // 原来是10，现在是50
+                        localProgressPercentage = progress
                         DispatchQueue.main.async {
-                            self.progressPercentage = progress
-                            if index % 50 == 0 { // 减少日志输出频率
+                            self.progressPercentage = localProgressPercentage
+                            if index % 200 == 0 { // 原来是50，现在是200
                                 print("正则匹配进度: \(Int(progress))% (处理了\(index)/\(matches.count)个匹配)")
                             }
                         }
@@ -212,6 +223,7 @@ class ChapterManager: ObservableObject {
             
             let defaultChapter = createDefaultChapter(content: content, documentId: document.id)
             
+            // 在主线程更新UI状态
             DispatchQueue.main.async {
                 self.chapters = [defaultChapter]
                 self.isProcessing = false
@@ -291,7 +303,7 @@ class ChapterManager: ObservableObject {
         }
         
         // 使用批处理方式创建章节，减轻UI线程负担
-        let batchSize = min(10, chapterPositions.count) // 每次处理10个章节
+        let batchSize = min(30, chapterPositions.count) // 每次处理30个章节（原来是10个）
         var currentBatch = 0
         
         while currentBatch * batchSize < chapterPositions.count && !isTimeout {
@@ -325,16 +337,17 @@ class ChapterManager: ObservableObject {
                 resultChapters.append(chapter)
                 
                 // 添加日志记录章节ID
-                if i % 10 == 0 || i == endIndex - 1 {
+                if i % 50 == 0 || i == endIndex - 1 {
                     print("创建章节: ID=\(chapter.id.uuidString), 标题=\(chapter.title)")
                 }
                 
-                // 更新进度 (章节创建占进度的50%)
+                // 更新进度 (章节创建占进度的50%) - 减少更新频率
                 let progress = 50.0 + (Double(i) / Double(max(1, chapterPositions.count - 1)) * 50.0)
-                if i % 5 == 0 || i == chapterPositions.count - 1 { // 减少更新频率
+                if i % 20 == 0 || i == chapterPositions.count - 1 { // 原来是5，现在是20
+                    localProgressPercentage = progress
                     DispatchQueue.main.async {
-                        self.progressPercentage = progress
-                        if i % 10 == 0 { // 减少日志输出频率
+                        self.progressPercentage = localProgressPercentage
+                        if i % 50 == 0 { // 原来是10，现在是50
                             print("章节创建进度: \(Int(progress))% (创建了\(i+1)/\(chapterPositions.count)个章节)")
                         }
                     }
@@ -344,11 +357,12 @@ class ChapterManager: ObservableObject {
             currentBatch += 1
             
             // 每处理完一批，就检查一下是否需要更新UI
-            if currentBatch % 2 == 0 {
+            if currentBatch % 5 == 0 { // 原来是2，现在是5
                 // 让主线程有机会更新UI
                 let progress = 50.0 + (Double(min(endIndex, chapterPositions.count)) / Double(chapterPositions.count) * 50.0)
+                localProgressPercentage = progress
                 DispatchQueue.main.async {
-                    self.progressPercentage = progress
+                    self.progressPercentage = localProgressPercentage
                     print("批处理进度: \(Int(progress))% (完成批次: \(currentBatch))")
                 }
                 
@@ -374,8 +388,9 @@ class ChapterManager: ObservableObject {
         saveChapters(resultChapters, for: document.id)
         
         // 在主线程更新UI状态
+        let finalResultChapters = resultChapters
         DispatchQueue.main.async {
-            self.chapters = resultChapters
+            self.chapters = finalResultChapters
             self.isProcessing = false
             self.progressPercentage = 100
             
@@ -383,10 +398,10 @@ class ChapterManager: ObservableObject {
             let endTime = Date()
             self.processingTimeInSeconds = endTime.timeIntervalSince(startTime)
             print("章节处理时间: \(self.processingTimeInSeconds)秒")
-            print("UI状态已更新: isProcessing = false (处理完成)")
+            print("UI状态已更新: isProcessing = false")
         }
         
-        return resultChapters
+        return finalResultChapters
     }
     
     // 创建一个默认章节
@@ -430,9 +445,11 @@ class ChapterManager: ObservableObject {
                 print("更新了文档的章节ID列表: \(chapterIds.count)个章节")
             }
             
-            // 确保将章节添加到对应的ArticleList中
-            for chapter in updatedChapters {
-                ArticleListManager.shared.addArticleToList(articleId: chapter.id, listId: documentId)
+            // 确保将章节添加到对应的ArticleList中 - 在主线程上操作UI相关对象
+            DispatchQueue.main.async {
+                for chapter in updatedChapters {
+                    ArticleListManager.shared.addArticleToList(articleId: chapter.id, listId: documentId)
+                }
             }
         } else {
             print("章节编码失败")
@@ -481,16 +498,28 @@ class ChapterManager: ObservableObject {
     // 清除文档的章节划分
     func clearChapters(for documentId: UUID) {
         UserDefaults.standard.removeObject(forKey: saveKey + documentId.uuidString)
-        if chapters.first?.documentId == documentId {
-            chapters.removeAll()
+        
+        // 在主线程更新@Published属性
+        DispatchQueue.main.async {
+            if self.chapters.first?.documentId == documentId {
+                self.chapters.removeAll()
+            }
         }
+        
         print("清除了文档的章节划分")
     }
     
     // 保存当前识别出的章节
     func saveChapters(for documentId: UUID) {
         print("保存当前\(chapters.count)个章节到文档ID: \(documentId)")
-        saveChapters(chapters, for: documentId)
+        
+        // 创建章节的本地副本，避免在异步操作中直接访问@Published属性
+        let chaptersToSave = self.chapters
+        
+        // 保存操作可以在后台线程进行
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.saveChapters(chaptersToSave, for: documentId)
+        }
     }
     
     // 确保章节具有所有必需的属性
