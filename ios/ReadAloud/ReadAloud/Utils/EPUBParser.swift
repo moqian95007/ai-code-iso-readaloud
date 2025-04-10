@@ -5,19 +5,13 @@ import Compression
 import CoreFoundation
 import ZIPFoundation
 
-// EPUB和MOBI文件解析器
-class EBookParser {
+// EPUB文件解析器
+class EPUBParser {
     // EPUB结构相关常量
     private struct EPUBConstants {
         static let containerPath = "META-INF/container.xml"
         static let contentFolderName = "OEBPS"
         static let contentTypesFile = "mimetype"
-    }
-    
-    // MOBI相关常量
-    private struct MOBIConstants {
-        static let headerIdentifier = "BOOKMOBI"
-        static let textEncoding = String.Encoding.utf8
     }
     
     // ZIP文件结构常量
@@ -29,7 +23,7 @@ class EBookParser {
     }
     
     // 解析EPUB文件
-    static func parseEPUB(url: URL) throws -> String {
+    static func parse(url: URL) throws -> String {
         print("开始解析EPUB文件: \(url.lastPathComponent)")
         
         // 创建临时目录用于解压文件
@@ -49,18 +43,18 @@ class EBookParser {
             // 解析container.xml找到内容文件
             let containerURL = tempDirectoryURL.appendingPathComponent(EPUBConstants.containerPath)
             guard fileManager.fileExists(atPath: containerURL.path) else {
-                throw NSError(domain: "EBookParser", code: 1, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：找不到container.xml文件"])
+                throw NSError(domain: "EPUBParser", code: 1, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：找不到container.xml文件"])
             }
             
             // 解析container.xml找到OPF文件位置
             let containerXml = try String(contentsOf: containerURL, encoding: .utf8)
             guard let opfPath = extractOPFPath(from: containerXml) else {
-                throw NSError(domain: "EBookParser", code: 2, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：无法找到内容文件路径"])
+                throw NSError(domain: "EPUBParser", code: 2, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：无法找到内容文件路径"])
             }
             
             let opfURL = tempDirectoryURL.appendingPathComponent(opfPath)
             guard fileManager.fileExists(atPath: opfURL.path) else {
-                throw NSError(domain: "EBookParser", code: 3, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：找不到内容文件"])
+                throw NSError(domain: "EPUBParser", code: 3, userInfo: [NSLocalizedDescriptionKey: "EPUB格式错误：找不到内容文件"])
             }
             
             // 从OPF文件解析目录和内容
@@ -241,48 +235,6 @@ class EBookParser {
         }
     }
     
-    // 解析MOBI文件
-    static func parseMOBI(url: URL) throws -> String {
-        print("开始解析MOBI文件: \(url.lastPathComponent)")
-        
-        // 由于MOBI格式复杂且没有标准Swift解析库，我们提供一个基础实现
-        // 在实际应用中，建议使用专门的MOBI解析库或转换为其他格式
-        
-        do {
-            // 读取文件数据
-            let data = try Data(contentsOf: url)
-            
-            // 检查是否是有效的MOBI文件（简单检查）
-            guard data.count > 60 else {
-                throw NSError(domain: "EBookParser", code: 10, userInfo: [NSLocalizedDescriptionKey: "MOBI文件太小，无法解析"])
-            }
-            
-            // 检查文件头部是否包含MOBI标识
-            let header = data.prefix(60)
-            if let headerString = String(data: header, encoding: .ascii),
-               headerString.contains(MOBIConstants.headerIdentifier) {
-                
-                // 这里是一个简单的实现，实际的MOBI解析非常复杂
-                // 我们尝试提取一些可能是文本的部分
-                var text = "【MOBI文件】\n\n文件名: \(url.lastPathComponent)\n\n"
-                
-                // 尝试在文件中寻找文本块（这是一个非常简化的方法）
-                // 实际的MOBI解析需要理解整个文件结构
-                if let potentialText = scanForText(in: data) {
-                    text += potentialText
-                } else {
-                    text += "无法提取MOBI文件中的文本内容。建议将MOBI转换为EPUB或TXT格式后再导入。"
-                }
-                
-                return text
-            } else {
-                throw NSError(domain: "EBookParser", code: 11, userInfo: [NSLocalizedDescriptionKey: "不是有效的MOBI文件格式"])
-            }
-        } catch {
-            throw error
-        }
-    }
-    
     // 从container.xml中提取OPF文件路径
     private static func extractOPFPath(from containerXml: String) -> String? {
         // 简单的XML解析，寻找rootfile元素的full-path属性
@@ -391,51 +343,5 @@ class EBookParser {
         result = lines.joined(separator: "\n")
         
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    // 在MOBI文件数据中扫描文本
-    private static func scanForText(in data: Data) -> String? {
-        // 在MOBI文件中找到可能的文本块
-        // 注意：这是一个非常简化的方法，不会处理复杂的MOBI结构
-        
-        // 尝试寻找HTML或纯文本内容
-        let patterns = ["<html", "<body", "<h1", "<h2", "chapter", "Chapter", "CHAPTER"]
-        var contentRanges: [Range<Data.Index>] = []
-        
-        for pattern in patterns {
-            if let patternData = pattern.data(using: .utf8) {
-                var searchRange = data.startIndex..<data.endIndex
-                while let range = data.range(of: patternData, options: [], in: searchRange) {
-                    contentRanges.append(range)
-                    searchRange = range.upperBound..<data.endIndex
-                }
-            }
-        }
-        
-        if contentRanges.isEmpty {
-            return nil
-        }
-        
-        // 按照位置排序
-        contentRanges.sort { $0.lowerBound < $1.lowerBound }
-        
-        // 尝试从第一个匹配之后提取一些内容
-        if let firstRange = contentRanges.first {
-            let startIndex = firstRange.lowerBound
-            let endIndex = min(startIndex + 10000, data.endIndex) // 提取不超过10KB的内容
-            let contentData = data[startIndex..<endIndex]
-            
-            // 尝试不同的编码
-            let encodings: [String.Encoding] = [.utf8, .ascii, .utf16LittleEndian, .utf16BigEndian]
-            
-            for encoding in encodings {
-                if let text = String(data: contentData, encoding: encoding) {
-                    // 提取纯文本
-                    return extractTextFromHTML(text)
-                }
-            }
-        }
-        
-        return nil
     }
 } 

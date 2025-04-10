@@ -57,20 +57,62 @@ class DocumentManager: ObservableObject {
                     actualFileType = "epub"
                     
                 default:
-                    if type.contains("mobi") {
+                    if type.contains("mobi") || url.pathExtension.lowercased() == "mobi" {
                         // MOBI文件
                         content = try importMOBIFile(url: url)
                         actualFileType = "mobi"
                     } else {
-                        // 尝试作为文本文件处理
-                        content = try importTextFile(url: url)
-                        actualFileType = "txt"
+                        // 基于文件扩展名尝试处理
+                        let fileExtension = url.pathExtension.lowercased()
+                        
+                        switch fileExtension {
+                        case "txt":
+                            content = try importTextFile(url: url)
+                            actualFileType = "txt"
+                        case "pdf":
+                            content = try importPDFFile(url: url)
+                            actualFileType = "pdf"
+                        case "rtf":
+                            content = try importRTFFile(url: url)
+                            actualFileType = "rtf"
+                        case "epub":
+                            content = try importEPUBFile(url: url)
+                            actualFileType = "epub"
+                        case "mobi":
+                            content = try importMOBIFile(url: url)
+                            actualFileType = "mobi"
+                        default:
+                            // 尝试作为文本文件处理
+                            content = try importTextFile(url: url)
+                            actualFileType = "txt"
+                        }
                     }
                 }
             } else {
-                // 尝试作为文本文件处理
-                content = try importTextFile(url: url)
-                actualFileType = "txt"
+                // 基于文件扩展名尝试处理
+                let fileExtension = url.pathExtension.lowercased()
+                
+                switch fileExtension {
+                case "txt":
+                    content = try importTextFile(url: url)
+                    actualFileType = "txt"
+                case "pdf":
+                    content = try importPDFFile(url: url)
+                    actualFileType = "pdf"
+                case "rtf":
+                    content = try importRTFFile(url: url)
+                    actualFileType = "rtf"
+                case "epub":
+                    content = try importEPUBFile(url: url)
+                    actualFileType = "epub"
+                case "mobi":
+                    content = try importMOBIFile(url: url)
+                    actualFileType = "mobi"
+                default:
+                    // 尝试作为文本文件处理
+                    content = try importTextFile(url: url)
+                    actualFileType = "txt"
+                }
             }
             
             // 安全检查：确保内容非空
@@ -223,9 +265,9 @@ class DocumentManager: ObservableObject {
     // 导入EPUB文件
     private func importEPUBFile(url: URL) throws -> String {
         do {
-            // 使用新的EBookParser解析EPUB文件
-            print("开始使用EBookParser解析EPUB文件")
-            let content = try EBookParser.parseEPUB(url: url)
+            // 使用新的EPUBParser解析EPUB文件
+            print("开始使用EPUBParser解析EPUB文件")
+            let content = try EPUBParser.parse(url: url)
             return content
         } catch {
             print("EPUB解析错误: \(error.localizedDescription)")
@@ -246,9 +288,9 @@ class DocumentManager: ObservableObject {
     // 导入MOBI文件
     private func importMOBIFile(url: URL) throws -> String {
         do {
-            // 使用新的EBookParser解析MOBI文件
-            print("开始使用EBookParser解析MOBI文件")
-            let content = try EBookParser.parseMOBI(url: url)
+            // 使用新的MOBIParser解析MOBI文件
+            print("开始使用MOBIParser解析MOBI文件")
+            let content = try MOBIParser.parse(url: url)
             return content
         } catch {
             print("MOBI解析错误: \(error.localizedDescription)")

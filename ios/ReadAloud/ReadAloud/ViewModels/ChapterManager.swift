@@ -76,7 +76,7 @@ class ChapterManager: ObservableObject {
         let patterns = [
             "第[0-9零一二三四五六七八九十百千万]+[章回节集卷篇].*?[\n\r]", // 中文章节格式
             "Chapter\\s*[0-9]+.*?[\n\r]", // 英文章节格式
-            "[0-9]+\\..*?[\n\r]", // 数字编号格式
+            // "[0-9]+\\..*?[\n\r]", // 数字编号格式 - 已移除此格式识别，避免将数字列表识别为章节
             "[0-9]+、.*?[\n\r]" // 数字顿号格式
         ]
         
@@ -333,12 +333,21 @@ class ChapterManager: ObservableObject {
                     listId: document.id // 设置章节所属列表ID为文档ID
                 )
                 
+                // 检查章节是否需要拆分（超过一万五千字）
+                let chaptersToAdd: [Chapter]
+                if chapterContent.count > 15000 {
+                    chaptersToAdd = splitLargeChapter(chapter: chapter)
+                    print("章节'\(title)'内容超过一万五千字，已拆分为\(chaptersToAdd.count)个子章节")
+                } else {
+                    chaptersToAdd = [chapter]
+                }
+                
                 // 添加章节到结果列表
-                resultChapters.append(chapter)
+                resultChapters.append(contentsOf: chaptersToAdd)
                 
                 // 添加日志记录章节ID
-                if i % 50 == 0 || i == endIndex - 1 {
-                    print("创建章节: ID=\(chapter.id.uuidString), 标题=\(chapter.title)")
+                if i % 100 == 0 || i == endIndex - 1 {
+                    print("创建章节: ID=\(chapter.id.uuidString), 标题=\(chapter.title)\(chaptersToAdd.count > 1 ? "，拆分为\(chaptersToAdd.count)个子章节" : "")")
                 }
                 
                 // 更新进度 (章节创建占进度的50%) - 减少更新频率
@@ -415,6 +424,101 @@ class ChapterManager: ObservableObject {
             documentId: documentId,
             listId: documentId // 设置章节所属列表ID为文档ID
         )
+    }
+    
+    // 将大章节拆分成多个小章节
+    private func splitLargeChapter(chapter: Chapter, maxChapterSize: Int = 15000, splitSize: Int = 5000) -> [Chapter] {
+        // 如果章节内容小于最大限制，直接返回原章节
+        if chapter.content.count <= maxChapterSize {
+            return [chapter]
+        }
+        
+        print("拆分大章节: '\(chapter.title)', 内容长度: \(chapter.content.count)字符")
+        
+        var result: [Chapter] = []
+        let content = chapter.content
+        var startOffset = 0
+        var partNumber = 1
+        
+        while startOffset < content.count {
+            // 计算本次拆分的结束位置
+            var endOffset = min(startOffset + splitSize, content.count)
+            
+            // 尝试在句子或段落边界处拆分
+            if endOffset < content.count {
+                let endIndex = content.index(content.startIndex, offsetBy: endOffset)
+                
+                // 往后找最多200个字符，寻找适合的拆分点
+                let maxLookAhead = min(200, content.count - endOffset)
+                var lookAheadIndex = endIndex
+                var foundBreak = false
+                
+                // 先尝试找段落边界（两个换行符）
+                for _ in 0..<maxLookAhead {
+                    if lookAheadIndex >= content.endIndex { break }
+                    
+                    // 检查是否在段落边界
+                    if content[lookAheadIndex] == "\n" {
+                        let nextIndex = content.index(after: lookAheadIndex)
+                        if nextIndex < content.endIndex && content[nextIndex] == "\n" {
+                            foundBreak = true
+                            endOffset = content.distance(from: content.startIndex, to: nextIndex)
+                            break
+                        }
+                    }
+                    
+                    lookAheadIndex = content.index(after: lookAheadIndex)
+                }
+                
+                // 如果没找到段落边界，尝试找句子边界（句号、问号、感叹号后跟空格或换行）
+                if !foundBreak {
+                    lookAheadIndex = endIndex
+                    for _ in 0..<maxLookAhead {
+                        if lookAheadIndex >= content.endIndex { break }
+                        
+                        if ["。", "！", "？", ".", "!", "?"].contains(content[lookAheadIndex]) {
+                            let nextIndex = content.index(after: lookAheadIndex)
+                            if nextIndex < content.endIndex && 
+                               ([" ", "\n", "\r", "\t"].contains(content[nextIndex]) || 
+                                CharacterSet.whitespacesAndNewlines.contains(content[nextIndex].unicodeScalars.first!)) {
+                                foundBreak = true
+                                endOffset = content.distance(from: content.startIndex, to: nextIndex)
+                                break
+                            }
+                        }
+                        
+                        lookAheadIndex = content.index(after: lookAheadIndex)
+                    }
+                }
+            }
+            
+            // 提取当前部分的内容
+            let partStartIndex = content.index(content.startIndex, offsetBy: startOffset)
+            let partEndIndex = content.index(content.startIndex, offsetBy: endOffset)
+            let partContent = String(content[partStartIndex..<partEndIndex])
+            
+            // 创建分段章节
+            let partTitle = "\(chapter.title)（\(partNumber)）"
+            let partChapter = Chapter(
+                id: UUID(),
+                title: partTitle,
+                content: partContent,
+                startIndex: chapter.startIndex + startOffset,
+                endIndex: chapter.startIndex + endOffset,
+                documentId: chapter.documentId,
+                listId: chapter.listId
+            )
+            
+            result.append(partChapter)
+            print("创建章节分段: '\(partTitle)', 内容长度: \(partContent.count)字符")
+            
+            // 更新下一次拆分的起始位置和部分编号
+            startOffset = endOffset
+            partNumber += 1
+        }
+        
+        print("章节'\(chapter.title)'已拆分为\(result.count)个小章节")
+        return result
     }
     
     // 保存文档的章节划分

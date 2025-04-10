@@ -1392,8 +1392,7 @@ struct ArticleReaderView: View {
             "第(\\d+)回", // 匹配"第33回"
             "Chapter (\\d+)", // 匹配"Chapter 33"
             "(\\d+)章", // 匹配"33章"
-            "章(\\d+)", // 匹配"章33"
-            "^(\\d+)\\s" // 匹配以数字开头的标题
+            "章(\\d+)" // 匹配"章33"
         ]
         
         for pattern in patterns {

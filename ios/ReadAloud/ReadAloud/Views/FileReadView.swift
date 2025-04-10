@@ -123,6 +123,19 @@ struct FileReadView: View {
                     if success {
                         // 导入成功，显示成功消息
                         showImportSuccess = true
+                        
+                        // 导入成功后强制重新加载文档库，确保排序生效
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            print("文档导入成功，强制重新加载文档库")
+                            documentLibrary.loadDocuments()
+                            
+                            // 发送通知刷新文档列表视图
+                            NotificationCenter.default.post(
+                                name: Notification.Name("DocumentLibraryLoaded"),
+                                object: nil
+                            )
+                            print("已触发文档库加载完成通知")
+                        }
                     } else {
                         // 导入失败，显示错误消息
                         errorMessage = "导入文档失败，请检查文件格式或权限"
@@ -343,6 +356,10 @@ struct DocumentListView: View {
         .onAppear {
             // 不直接调用loadDocuments，而是监听加载完成通知
             print("DocumentListView视图出现")
+            
+            // 确保文档库已经加载并按照最新规则排序
+            documentLibrary.loadDocuments()
+            
             // 仅在需要强制刷新视图时调用
             refreshID = UUID()
         }
@@ -1105,16 +1122,25 @@ struct DocumentArticleReaderView: View {
            !sortedChapters.isEmpty {
             
             // 创建完整的文章列表供播放器使用
-            let articleList = sortedChapters.map { chapter -> Article in
+            let articleList = sortedChapters.enumerated().map { (index, chapter) -> Article in
                 // 格式化章节标题，与后续处理保持一致
                 let title: String
                 if chapter.title == "前言" {
                     // 保持前言标题不变
                     title = "前言"
                 } else {
-                    // 普通章节添加章节编号
-                    // 尝试从章节标题中提取编号
-                    let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : sortedChapters.firstIndex(of: chapter)! + 1
+                    // 计算章节编号
+                    // 先检查是否存在前言
+                    let hasPreface = sortedChapters.contains(where: { $0.title == "前言" })
+                    // 如果有前言，需要调整编号计算方式
+                    var chapterNumber = index + 1
+                    if hasPreface {
+                        // 找出非前言的章节数量和当前章节在非前言章节中的位置
+                        let nonPrefaceChapters = sortedChapters.filter { $0.title != "前言" }
+                        if let nonPrefaceIndex = nonPrefaceChapters.firstIndex(where: { $0.id == chapter.id }) {
+                            chapterNumber = nonPrefaceIndex + 1
+                        }
+                    }
                     title = "第\(chapterNumber)章: \(chapter.title)"
                 }
                 
@@ -1314,9 +1340,18 @@ struct DocumentArticleReaderView: View {
                 // 保持前言标题不变
                 title = "前言"
             } else {
-                // 普通章节添加章节编号
-                // 尝试从章节标题中提取编号
-                let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : self.chapterManager.chapters.firstIndex(of: chapter)! + 1
+                // 计算章节编号
+                // 先检查是否存在前言
+                let hasPreface = chapters.contains(where: { $0.title == "前言" })
+                // 如果有前言，需要调整编号计算方式
+                var chapterNumber = index + 1
+                if hasPreface {
+                    // 找出非前言的章节数量和当前章节在非前言章节中的位置
+                    let nonPrefaceChapters = chapters.filter { $0.title != "前言" }
+                    if let nonPrefaceIndex = nonPrefaceChapters.firstIndex(where: { $0.id == chapter.id }) {
+                        chapterNumber = nonPrefaceIndex + 1
+                    }
+                }
                 title = "第\(chapterNumber)章: \(chapter.title)"
             }
             
@@ -1534,27 +1569,25 @@ struct DocumentArticleReaderView: View {
             currentPlayingArticle = article
             print("从SpeechManager获取到当前文章: \(article.title)")
             
-            // 尝试根据章节标题直接确定索引
-            let titleStr = article.title
-            let chapterPattern = "第(\\d+)章"
-            if let range = titleStr.range(of: chapterPattern, options: .regularExpression),
-               let chapterIndex = titleStr.firstIndex(of: "章") {
-                // 确定结束位置，优先使用冒号，否则使用"章"字符后的位置
-                let endIndex = titleStr.firstIndex(of: ":") ?? titleStr.index(after: chapterIndex)
-                let startIndex = titleStr.index(after: range.lowerBound) // 跳过"第"字符
-                let numberString = titleStr[startIndex..<endIndex].trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "章", with: "").replacingOccurrences(of: ":", with: "")
-                
-                if let chapterNumber = Int(numberString), chapterNumber > 0, chapterNumber <= chapters.count {
-                    currentIndex = chapterNumber - 1
-                    print("根据章节标题直接确定索引: \(currentIndex+1)/\(chapters.count)")
-                }
-            }
-            
-            // 如果无法通过标题确定，尝试通过ID查找
-            if currentIndex == 0 {
-                if let index = chapters.firstIndex(where: { $0.id == article.id }) {
-                    currentIndex = index
-                    print("根据文章ID找到章节索引: \(currentIndex+1)/\(chapters.count)")
+            // 优先使用ID查找对应章节
+            if let index = chapters.firstIndex(where: { $0.id == article.id }) {
+                currentIndex = index
+                print("根据文章ID找到章节索引: \(currentIndex+1)/\(chapters.count)")
+            } else {
+                // 尝试根据章节标题中的索引查找
+                let titleStr = article.title
+                let chapterPattern = "第(\\d+)章"
+                if let range = titleStr.range(of: chapterPattern, options: .regularExpression),
+                   let chapterIndex = titleStr.firstIndex(of: "章") {
+                    // 确定结束位置，优先使用冒号，否则使用"章"字符后的位置
+                    let endIndex = titleStr.firstIndex(of: ":") ?? titleStr.index(after: chapterIndex)
+                    let startIndex = titleStr.index(after: range.lowerBound) // 跳过"第"字符
+                    let numberString = titleStr[startIndex..<endIndex].trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "章", with: "").replacingOccurrences(of: ":", with: "")
+                    
+                    if let chapterNumber = Int(numberString), chapterNumber > 0, chapterNumber <= chapters.count {
+                        currentIndex = chapterNumber - 1
+                        print("根据章节标题中的索引确定位置: \(currentIndex+1)/\(chapters.count)")
+                    }
                 }
             }
         }
@@ -1647,9 +1680,18 @@ struct DocumentArticleReaderView: View {
                     // 保持前言标题不变
                     title = "前言"
                 } else {
-                    // 普通章节添加章节编号
-                    // 尝试从章节标题中提取编号
-                    let chapterNumber = chapter.chapterNumber > 0 ? chapter.chapterNumber : self.chapterManager.chapters.firstIndex(of: chapter)! + 1
+                    // 计算章节编号
+                    // 先检查是否存在前言
+                    let hasPreface = self.chapterManager.chapters.contains(where: { $0.title == "前言" })
+                    // 如果有前言，需要调整编号计算方式
+                    var chapterNumber = index + 1
+                    if hasPreface {
+                        // 找出非前言的章节数量和当前章节在非前言章节中的位置
+                        let nonPrefaceChapters = self.chapterManager.chapters.filter { $0.title != "前言" }
+                        if let nonPrefaceIndex = nonPrefaceChapters.firstIndex(where: { $0.id == chapter.id }) {
+                            chapterNumber = nonPrefaceIndex + 1
+                        }
+                    }
                     title = "第\(chapterNumber)章: \(chapter.title)"
                 }
                 

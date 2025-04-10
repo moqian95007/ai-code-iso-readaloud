@@ -60,7 +60,12 @@ class DocumentLibraryManager: ObservableObject {
                 
                 // 在主线程更新文档数组
                 DispatchQueue.main.async {
+                    // 先设置有效文档
                     self.documents = validDocuments
+                    
+                    // 对文档进行排序
+                    self.sortDocuments()
+                    
                     print("成功加载\(validDocuments.count)个有效文档")
                     
                     if needsSave {
@@ -137,6 +142,8 @@ class DocumentLibraryManager: ObservableObject {
                 
                 // 只输出文档数量，避免过多日志
                 print("保存了\(validDocuments.count)个文档")
+                
+                // 不需要在保存时排序
                 
                 // 批量处理ArticleList关联，避免为每个文档单独输出日志
                 let listManager = ArticleListManager.shared
@@ -216,7 +223,31 @@ class DocumentLibraryManager: ObservableObject {
         }
     }
     
-    // 添加新文档
+    // 添加文档
+    func addDocument(_ document: Document) {
+        // 验证内容不为空
+        guard !document.content.isEmpty else {
+            print("错误: 尝试添加空内容文档，已拒绝")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            // 添加文档到数组
+            self.documents.append(document)
+            
+            // 添加文档后立即排序
+            self.sortDocuments()
+            
+            // 保存文档
+            self.saveDocuments()
+            
+            // 通知观察者文档集合已更改
+            self.objectWillChange.send()
+            print("添加了新文档: \(document.title), 类型: \(document.fileType), 内容长度: \(document.content.count)")
+        }
+    }
+    
+    // 添加新文档（使用各个参数创建）
     func addDocument(title: String, content: String, fileType: String) {
         // 验证内容不为空
         guard !content.isEmpty else {
@@ -232,18 +263,8 @@ class DocumentLibraryManager: ObservableObject {
             createdAt: Date()
         )
         
-        // 所有修改ObservableObject的操作在主线程执行
-        DispatchQueue.main.async {
-            // 添加到文档数组
-            self.documents.append(newDocument)
-            
-            // 保存文档（saveDocuments方法已修改为在主线程更新）
-            self.saveDocuments()
-            
-            // 显式通知观察者文档集合已更改
-            self.objectWillChange.send()
-            print("添加了新文档: \(title), 类型: \(fileType), 内容长度: \(content.count)")
-        }
+        // 调用添加文档方法
+        addDocument(newDocument)
     }
     
     // 删除文档
@@ -314,16 +335,20 @@ class DocumentLibraryManager: ObservableObject {
             return
         }
         
-        // 查找要更新的文档
-        guard let index = documents.firstIndex(where: { $0.id == document.id }) else {
-            return
-        }
-        
-        // 所有修改ObservableObject的操作在主线程执行
         DispatchQueue.main.async {
-            self.documents[index] = document
-            self.saveDocuments()
-            print("更新了文档: \(document.title), 内容长度: \(document.content.count)")
+            // 查找并更新文档
+            if let index = self.documents.firstIndex(where: { $0.id == document.id }) {
+                self.documents[index] = document
+                
+                // 不需要在更新时排序
+                
+                // 保存文档
+                self.saveDocuments()
+                
+                // 通知观察者文档集合已更改
+                self.objectWillChange.send()
+                print("更新了文档: \(document.title), 内容长度: \(document.content.count)")
+            }
         }
     }
     
@@ -340,12 +365,101 @@ class DocumentLibraryManager: ObservableObject {
         return doc
     }
     
-    // 强制刷新文档列表视图
-    func refreshDocumentList() {
-        // 通知观察者文档集合已更改，强制UI刷新
-        DispatchQueue.main.async {
-            print("强制刷新文档列表视图")
-            self.objectWillChange.send()
+    // 根据导入时间（倒序）和上次播放时间（倒序）对文档进行排序
+    private func sortDocuments() {
+        print("开始对文档进行排序，排序前总数: \(documents.count)")
+        
+        if !documents.isEmpty {
+            print("排序前第一个文档: \(documents[0].title), 创建时间: \(formatDate(documents[0].createdAt))")
         }
+        
+        // 确保排序前的数组是稳定的
+        self.documents.sort { doc1, doc2 in
+            // 获取两个文档的所有相关时间
+            let createdAt1 = doc1.createdAt
+            let createdAt2 = doc2.createdAt
+            let lastPlayTime1 = UserDefaults.standard.double(forKey: "lastDocumentPlayTime_\(doc1.id.uuidString)")
+            let lastPlayTime2 = UserDefaults.standard.double(forKey: "lastDocumentPlayTime_\(doc2.id.uuidString)")
+            
+            // 创建时间数组（转换成TimeInterval以便比较）
+            var times1: [TimeInterval] = [createdAt1.timeIntervalSince1970]
+            var times2: [TimeInterval] = [createdAt2.timeIntervalSince1970]
+            
+            // 将有效的播放时间添加到数组中（只添加大于0的时间）
+            if lastPlayTime1 > 0 {
+                times1.append(lastPlayTime1)
+            }
+            
+            if lastPlayTime2 > 0 {
+                times2.append(lastPlayTime2)
+            }
+            
+            // 打印比较的文档信息
+            print("比较文档: '\(doc1.title)' (创建时间: \(formatDate(createdAt1)), 播放时间: \(lastPlayTime1 > 0 ? formatDate(Date(timeIntervalSince1970: lastPlayTime1)) : "无")) vs '\(doc2.title)' (创建时间: \(formatDate(createdAt2)), 播放时间: \(lastPlayTime2 > 0 ? formatDate(Date(timeIntervalSince1970: lastPlayTime2)) : "无"))")
+            
+            // 比较两个文档的最大时间（取最大值进行比较）
+            if let maxTime1 = times1.max(), let maxTime2 = times2.max() {
+                if maxTime1 != maxTime2 {
+                    let result = maxTime1 > maxTime2
+                    print("  基于最大时间排序: \(result ? "第一个文档时间更近" : "第二个文档时间更近")")
+                    return result
+                }
+            }
+            
+            // 如果最大时间相同，比较次大时间（如果存在）
+            if times1.count > 1 && times2.count > 1 {
+                // 对时间数组进行排序（降序）
+                times1.sort(by: >)
+                times2.sort(by: >)
+                
+                // 比较次大时间
+                if times1[1] != times2[1] {
+                    let result = times1[1] > times2[1]
+                    print("  基于次大时间排序: \(result ? "第一个文档次大时间更近" : "第二个文档次大时间更近")")
+                    return result
+                }
+            }
+            
+            // 如果一个文档有两个时间而另一个只有一个时间，有两个时间的排在前面
+            if times1.count > times2.count {
+                print("  第一个文档有更多时间记录")
+                return true
+            } else if times2.count > times1.count {
+                print("  第二个文档有更多时间记录")
+                return false
+            }
+            
+            // 如果所有时间都相同或不存在，保持相对顺序
+            print("  两个文档时间记录相同或不具有可比性，保持原有顺序")
+            return true
+        }
+        
+        // 输出排序后的结果
+        if !documents.isEmpty {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            
+            print("\n排序后的文档列表:")
+            for (index, doc) in documents.enumerated() {
+                let timeStamp = UserDefaults.standard.double(forKey: "lastDocumentPlayTime_\(doc.id.uuidString)")
+                let playTimeStr = timeStamp > 0 ? dateFormatter.string(from: Date(timeIntervalSince1970: timeStamp)) : "无播放记录"
+                
+                print("\(index+1). '\(doc.title)' - 创建时间: \(dateFormatter.string(from: doc.createdAt)), 上次播放: \(playTimeStr)")
+            }
+        }
+        
+        print("文档排序完成，共 \(documents.count) 个文档\n")
+    }
+    
+    // 格式化日期为字符串，用于日志输出
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+    
+    // 刷新文档列表（不重新加载，只是触发UI更新）
+    func refreshDocumentList() {
+        objectWillChange.send()
     }
 } 
