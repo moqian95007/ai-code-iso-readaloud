@@ -62,6 +62,9 @@ struct ReadAloudApp: App {
                         // 离开播放页面时显示浮动球
                         print("App层级收到ExitPlaybackView通知，显示浮动球")
                         
+                        // 记录离开播放界面的时间戳
+                        UserDefaults.standard.set(Date(), forKey: "lastExitPlaybackViewTime")
+                        
                         // 延迟显示浮动球，避免在导航动画过程中显示
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             floatingBallManager.show()
@@ -85,11 +88,17 @@ struct ReadAloudApp: App {
                 // 应用即将进入后台，保存进度但不停止播放
                 if speechManager.isPlaying {
                     print("应用进入后台，保存播放进度")
+                    // 保存当前播放进度
+                    speechManager.savePlaybackProgress()
                     // 保存当前播放状态到全局播放管理器
                     if let article = speechManager.getCurrentArticle() {
                         let contentType: PlaybackContentType = article.id.description.hasPrefix("doc-") ? .document : .article
                         playbackManager.startPlayback(contentId: article.id, title: article.title, type: contentType)
                     }
+                } else if speechManager.isResuming {
+                    // 即使未播放但有恢复状态时也保存进度
+                    print("应用进入后台，未播放但有恢复状态，保存进度")
+                    speechManager.savePlaybackProgress()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in

@@ -61,7 +61,7 @@ struct ArticleListPopoverView: View {
                         }
                     }
                 }
-                .navigationBarTitle("章节列表（共\(articles.count)章）", displayMode: .inline)
+                .navigationBarTitle("文章列表（共\(articles.count)篇）", displayMode: .inline)
                 .navigationBarItems(trailing: Button("关闭") {
                     isPresented = false
                 })

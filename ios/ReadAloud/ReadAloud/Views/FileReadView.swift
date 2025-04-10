@@ -1,7 +1,13 @@
 import SwiftUI
 import Foundation
 
+// 添加全局控制变量
+fileprivate var isDocumentLoadingDisabled = false
+
 struct FileReadView: View {
+    // 控制是否应该加载文档库
+    static var isDocumentLoadingDisabled: Bool = false
+    
     @State private var showImportPicker = false
     @State private var showImportSuccess = false
     @State private var showImportError = false
@@ -100,11 +106,38 @@ struct FileReadView: View {
             .navigationBarHidden(true)
             .onAppear {
                 print("FileReadView出现")
+                
+                // 检查当前是否真的在首页标签
+                let currentTab = UserDefaults.standard.integer(forKey: "currentSelectedTab")
+                if currentTab != 0 { // 0 是首页标签
+                    print("FileReadView虽然出现但当前标签为 \(currentTab)，不是首页，跳过文档库加载")
+                    return
+                }
+                
                 // 确保文档库完全加载
                 DispatchQueue.main.async {
                     print("重新加载文档库以确保数据完整性")
                     documentLibrary.loadDocuments()
                     print("文档库已加载，共 \(documentLibrary.documents.count) 个文档")
+                }
+                
+                // 监听禁用文档库加载的通知
+                NotificationCenter.default.addObserver(
+                    forName: Notification.Name("DisableDocumentLoading"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    if let disabled = notification.userInfo?["disabled"] as? Bool {
+                        FileReadView.isDocumentLoadingDisabled = disabled
+                        print("文档库加载状态已更新: \(disabled ? "已禁用" : "已启用")")
+                    }
+                }
+                
+                // 检查当前选中的标签页，如果确实是文档标签页(0)，则重新启用文档加载
+                if let currentTab = UserDefaults.standard.object(forKey: "currentSelectedTab") as? Int, 
+                   currentTab == 0 {
+                    print("确认当前在文档标签页，重新启用文档库加载")
+                    FileReadView.isDocumentLoadingDisabled = false
                 }
             }
             .sheet(isPresented: $showImportPicker) {
@@ -247,6 +280,18 @@ struct FileReadView: View {
             }
         }
     }
+    
+    func loadDocumentLibrary() {
+        // 检查是否从播放界面返回，如果是，也不加载文档库
+        if FileReadView.isDocumentLoadingDisabled {
+            print("文档加载已被禁用，可能是刚从播放界面返回到文章列表，跳过文档库加载")
+            return
+        }
+        
+        Task {
+            // ... existing code ...
+        }
+    }
 }
 
 // 头部视图
@@ -354,10 +399,24 @@ struct DocumentListView: View {
         }
         .id(refreshID) // 使用 refreshID 作为视图的 ID
         .onAppear {
-            // 不直接调用loadDocuments，而是监听加载完成通知
+            // 检查当前是否为文档标签页，只有在文档标签页才加载文档库
             print("DocumentListView视图出现")
             
+            // 严格检查当前标签页
+            let currentTab = UserDefaults.standard.integer(forKey: "currentSelectedTab")
+            if currentTab != 0 { // 0代表文档标签页
+                print("当前在标签页\(currentTab)，不是文档标签页，完全跳过文档库加载")
+                return
+            }
+            
+            // 检查是否从播放界面返回，如果是，也不加载文档库
+            if FileReadView.isDocumentLoadingDisabled {
+                print("文档加载已被禁用，可能是刚从播放界面返回到文章列表，跳过文档库加载")
+                return
+            }
+            
             // 确保文档库已经加载并按照最新规则排序
+            print("当前确实在文档标签页，加载文档库")
             documentLibrary.loadDocuments()
             
             // 仅在需要强制刷新视图时调用
@@ -1153,13 +1212,45 @@ struct DocumentArticleReaderView: View {
                 )
             }
             
-            // 预先更新播放列表
-            if !articleList.isEmpty {
-                SpeechManager.shared.updatePlaylist(articleList)
+            // 检查SpeechManager的播放列表是否与当前文档匹配
+            let speechManager = SpeechManager.shared
+            let managerList = speechManager.lastPlayedArticles
+            
+            if !managerList.isEmpty {
+                // 获取当前播放列表的内容源ID
+                let playlistSourceId = managerList.first?.listId
+                // 获取当前文档ID
+                let currentDocumentId = self.document.id
+                
+                print("播放列表内容源ID: \(playlistSourceId?.uuidString ?? "无")")
+                print("当前文档ID: \(currentDocumentId.uuidString)")
+                
+                // 如果内容源ID不匹配，强制更新播放列表
+                if playlistSourceId != currentDocumentId {
+                    print("⚠️ 检测到内容源不匹配，强制更新播放列表为当前文档章节")
+                    
+                    // 强制更新播放列表
+                    speechManager.updatePlaylist(articleList)
+                    print("已更新播放列表，包含 \(articleList.count) 篇文章")
+                    if let firstArticle = articleList.first, let lastArticle = articleList.last {
+                        print("列表第一篇ID: \(firstArticle.id.uuidString), 最后一篇ID: \(lastArticle.id.uuidString)")
+                    }
+                    
+                    // 确保内容类型设置正确
+                    UserDefaults.standard.set("document", forKey: "lastPlayedContentType")
+                } else {
+                    print("播放列表与当前文档匹配，无需更新")
+                }
+            } else {
+                // 预先更新播放列表
+                speechManager.updatePlaylist(articleList)
                 print("初始化时预设置播放列表，包含 \(articleList.count) 篇文章")
                 if let firstArticle = articleList.first, let lastArticle = articleList.last {
                     print("列表第一篇ID: \(firstArticle.id.uuidString), 最后一篇ID: \(lastArticle.id.uuidString)")
                 }
+                
+                // 确保内容类型设置正确
+                UserDefaults.standard.set("document", forKey: "lastPlayedContentType")
             }
         }
     }

@@ -274,6 +274,7 @@ class SpeechManager: ObservableObject {
         print("当前模式: \(playbackMode.rawValue)")
         print("isPlaying: \(isPlaying), isResuming: \(isResuming)")
         print("手动暂停标志: \(speechDelegate.wasManuallyPaused)")
+        print("接近文章末尾标志: \(speechDelegate.isNearArticleEnd)")
         print("起始位置: \(speechDelegate.startPosition)")
         print("正在处理下一篇文章: \(isProcessingNextArticle)")
         
@@ -284,8 +285,8 @@ class SpeechManager: ObservableObject {
         }
         
         // 此时synthesizer已经停止朗读，但我们需要确定是自然结束还是手动暂停
-        // 手动暂停时会设置isResuming=true，isPlaying=false
-        let isUserPaused = isResuming && !isPlaying
+        // 手动暂停时会设置isResuming=true，isPlaying=false，同时wasManuallyPaused=true
+        let isUserPaused = isResuming && !isPlaying && speechDelegate.wasManuallyPaused && !speechDelegate.isNearArticleEnd
         
         // 检查是否是从中间位置开始的播放
         let isStartedFromMiddle = speechDelegate.startPosition > 0
@@ -294,6 +295,9 @@ class SpeechManager: ObservableObject {
             print("检测到是用户手动暂停，不执行自动播放")
             return
         }
+        
+        // 如果来到这里，要么是自然播放结束，要么是接近文章末尾的特殊情况
+        print("检测到自然播放结束或接近文章末尾特殊情况，准备处理后续播放")
         
         // 检查定时关闭选项 - 播完本章后停止
         let timerManager = TimerManager.shared
@@ -452,7 +456,7 @@ class SpeechManager: ObservableObject {
     }
     
     // 播放列表中的下一篇文章
-    private func playNextArticle() {
+    func playNextArticle() {
         print("========= 请求播放下一篇文章 =========")
         
         // 判断当前播放列表状态
@@ -472,7 +476,81 @@ class SpeechManager: ObservableObject {
         )
         
         print("已发送PlayNextArticle通知")
+        
+        // 检查是否有ArticleReaderView在处理这个通知
+        // 通过检查最近退出播放界面的时间来判断是否在后台播放
+        let lastExitTime = UserDefaults.standard.object(forKey: "lastExitPlaybackViewTime") as? Date
+        let now = Date()
+        
+        if let lastExit = lastExitTime, now.timeIntervalSince(lastExit) < 60 * 10 { // 如果10分钟内退出过播放界面
+            print("检测到可能处于后台播放状态，SpeechManager将直接处理播放下一篇逻辑")
+            
+            // 延迟一点以确保通知有机会先被处理（如果有监听器的话）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.handlePlayNextArticleInBackground()
+            }
+        }
+        
         print("=====================================")
+    }
+    
+    // 在后台处理播放下一篇文章的逻辑
+    private func handlePlayNextArticleInBackground() {
+        print("========= SpeechManager.handlePlayNextArticleInBackground =========")
+        
+        // 确保播放列表不为空且有当前文章
+        guard !lastPlayedArticles.isEmpty, let currentArticle = self.currentArticle else {
+            print("播放列表为空或当前没有正在播放的文章，无法切换到下一篇")
+            return
+        }
+        
+        // 找到当前文章在播放列表中的位置
+        if let currentIndex = lastPlayedArticles.firstIndex(where: { $0.id == currentArticle.id }) {
+            print("当前文章索引: \(currentIndex)")
+            
+            // 计算下一篇文章的索引
+            let nextIndex = (currentIndex + 1) % lastPlayedArticles.count
+            print("下一篇文章索引: \(nextIndex)")
+            
+            // 获取下一篇文章
+            let nextArticle = lastPlayedArticles[nextIndex]
+            print("下一篇文章: \(nextArticle.title), ID: \(nextArticle.id)")
+            
+            // 保存最近播放的文章ID
+            UserDefaults.standard.set(nextArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
+            
+            // 设置播放器为新文章
+            self.setup(for: nextArticle)
+            
+            // 稍微延迟开始播放
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.startSpeaking()
+                print("已切换到下一篇并开始播放")
+            }
+        } else {
+            print("当前文章不在播放列表中，尝试使用第一篇文章")
+            
+            // 如果当前文章不在列表中，尝试播放列表的第一篇文章
+            if let firstArticle = lastPlayedArticles.first {
+                print("播放列表的第一篇文章: \(firstArticle.title), ID: \(firstArticle.id)")
+                
+                // 保存最近播放的文章ID
+                UserDefaults.standard.set(firstArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
+                
+                // 设置播放器为新文章
+                self.setup(for: firstArticle)
+                
+                // 稍微延迟开始播放
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.startSpeaking()
+                    print("已切换到第一篇并开始播放")
+                }
+            } else {
+                print("列表中没有文章可播放")
+            }
+        }
+        
+        print("=================================================")
     }
     
     // 为新文章准备语音合成器
@@ -481,6 +559,31 @@ class SpeechManager: ObservableObject {
         print("设置文章: \(article.title)")
         print("文章ID: \(article.id.uuidString)")
         print("内容长度: \(article.content.count)")
+        
+        // 检查是否是文章切换标志
+        if speechDelegate.isArticleSwitching {
+            print("检测到文章切换标志，确保不会触发自动播放逻辑")
+        }
+        
+        // 检查是否有文章正在播放，如果有强制参数就忽略正在播放的检查
+        if isPlaying && currentArticle != nil && currentArticle?.id != article.id {
+            print("⚠️ 警告：当前有其他文章正在播放，仅设置界面显示但不修改播放状态")
+            print("当前播放文章: \(currentArticle?.title ?? "未知"), ID: \(currentArticle?.id.uuidString ?? "未知")")
+            print("要设置的文章: \(article.title), ID: \(article.id.uuidString)")
+            
+            // 添加设置文章切换标志，防止自动播放下一篇文章
+            speechDelegate.isArticleSwitching = true
+            print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+            
+            // 在此情况下，仅设置显示用的文本，但不更改播放状态和当前文章
+            // 这样界面可以显示新打开的文章内容，但不会影响当前正在播放的内容
+            print("保留当前播放状态，仅更新UI显示")
+            
+            // 停止当前界面的计时器，防止更新不相关文章的进度条
+            stopTimer()
+            
+            return
+        }
         
         // 保存当前文章引用
         self.currentArticle = article
@@ -582,38 +685,59 @@ class SpeechManager: ObservableObject {
     
     // 开始朗读全文
     func startSpeaking() {
-        print("开始朗读全文，进行额外的安全检查")
+        print("========= SpeechManager.startSpeaking =========")
         
-        // 防止短时间内重复调用
-        let now = Date()
-        if now.timeIntervalSince(lastStartTime) < 1.0 && synthesizer.isSpeaking {
-            print("⚠️ 短时间内重复启动朗读，已忽略")
+        // 检查是否有已保存的位置需要恢复
+        if isResuming && currentPlaybackPosition > 0 {
+            print("检测到需要恢复的位置: \(currentPlaybackPosition)")
+            
+            // 从保存的位置开始朗读
+            startSpeakingFromPosition(currentPlaybackPosition)
+            
+            // 重置恢复标志，避免下次自动恢复
+            isResuming = false
+            
             return
         }
-        lastStartTime = now
         
-        // 如果全局有其他内容在播放，先停止它
-        if playbackManager.isPlaying && playbackManager.currentContentId != currentArticle?.id {
-            playbackManager.stopPlayback()
-        }
-        
-        // 如果正在播放，先停止当前播放
+        // 检查合成器当前状态
         if synthesizer.isSpeaking {
+            print("检测到合成器正在朗读，先停止当前朗读")
             synthesizer.stopSpeaking(at: .immediate)
-            speechDelegate.isSpeaking = false
-            stopTimer()
             
-            // 延迟一点再重新开始，确保前一个朗读已完全停止
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // 添加一个短暂延迟，确保停止操作完成
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                print("停止后重新开始朗读")
                 self.doStartSpeaking()
             }
             return
         }
         
-        // 不在播放中，直接开始
+        // 检查当前文章切换状态标志
+        if speechDelegate.isArticleSwitching {
+            print("⚠️ 警告：检测到isArticleSwitching=true，这可能会影响播放完成的处理逻辑")
+        }
+        
+        // 开始朗读全文，进行额外的安全检查
+        print("开始朗读全文，进行额外的安全检查")
+        
+        // 检查是否有文章
+        if currentArticle == nil {
+            print("错误：当前没有设置文章，无法开始朗读")
+            return
+        }
+        
+        // 检查文本是否为空
+        if currentText.isEmpty {
+            print("错误：当前文章内容为空，无法开始朗读")
+            return
+        }
+        
+        // 调用实际的开始朗读方法
         doStartSpeaking()
         
         print("开始朗读完成")
+        print("=======================================")
     }
     
     // 实际执行朗读的内部方法
@@ -625,8 +749,15 @@ class SpeechManager: ObservableObject {
         // 重置起始位置为0
         speechDelegate.startPosition = 0
         
-        // 重置关键标志
+        // 重置手动暂停标志
         speechDelegate.wasManuallyPaused = false
+        
+        // 重要：检查当前isArticleSwitching标志状态
+        let isSwitching = speechDelegate.isArticleSwitching
+        print("开始朗读前isArticleSwitching = \(isSwitching)，不再自动重置此标志")
+        
+        // 不要在此处重置isArticleSwitching标志，让它在didFinish时被检查
+        // speechDelegate.isArticleSwitching = false
         
         // 创建语音合成器使用的话语对象
         let utterance = AVSpeechUtterance(string: currentText)
@@ -659,12 +790,20 @@ class SpeechManager: ObservableObject {
         
         // 更新状态
         isPlaying = true
+        isResuming = false  // 重置恢复状态，因为现在已经开始播放了
         
         // 更新锁屏界面信息
         updateNowPlayingInfo()
         
         // 开始定时器更新进度
         startTimer()
+        
+        // 如果是因为文章切换而开始播放，添加日志信息
+        if isSwitching {
+            // 不要立即重置isArticleSwitching标志，让didStart事件中处理
+            // 注意：此处依赖SpeechDelegate中延迟回调来安全地重置该标志
+            print("文章切换状态下开始朗读，稍后将在安全时机重置isArticleSwitching标志")
+        }
     }
     
     // 从指定位置开始朗读
@@ -673,12 +812,21 @@ class SpeechManager: ObservableObject {
         print("指定位置: \(position)")
         print("文本总长度: \(currentText.count)")
         
+        // 检查合成器当前状态
+        let wasSpeaking = synthesizer.isSpeaking
+        
         // 如果正在播放，先停止当前播放
-        if synthesizer.isSpeaking {
+        if wasSpeaking {
             print("停止当前播放")
             synthesizer.stopSpeaking(at: .immediate)
             speechDelegate.isSpeaking = false
             stopTimer()
+            
+            // 添加短暂延迟，确保停止操作完成
+            if position > 0 { // 只在真正需要从中间位置开始时添加延迟
+                print("添加短暂延迟，确保停止操作完成")
+                Thread.sleep(forTimeInterval: 0.1) // 小延迟以确保停止已处理
+            }
         }
         
         // 安全检查：确保位置在有效范围内
@@ -689,6 +837,11 @@ class SpeechManager: ObservableObject {
         
         // 判断是否是从中间位置开始的新播放
         let isResumeFromMiddle = safePosition > 0 && safePosition < currentText.count - 1
+        
+        // 检查当前文章切换状态
+        if speechDelegate.isArticleSwitching {
+            print("⚠️ 警告：从指定位置开始播放时检测到isArticleSwitching=true，这可能会影响播放完成的处理逻辑")
+        }
         
         // 如果是从中间位置开始的播放（非开头非结尾），应该被视为用户操作，不应触发自动"下一篇"逻辑
         if isResumeFromMiddle || isResuming {
@@ -750,8 +903,9 @@ class SpeechManager: ObservableObject {
                 // 重置位置为0
                 speechDelegate.startPosition = 0
                 
-                // 确保正确设置标志
+                // 确保正确设置标志 - 使用新的标志而不是手动暂停标志
                 speechDelegate.wasManuallyPaused = false
+                speechDelegate.isNearArticleEnd = true
                 
                 // 立即更新进度和高亮范围
                 forceUpdateUI(position: 0)
@@ -838,9 +992,28 @@ class SpeechManager: ObservableObject {
             return
         }
         
+        // 记录当前位置，确保能正确恢复
+        currentPlaybackPosition = calculateCurrentPosition()
+        print("暂停时记录当前位置: \(currentPlaybackPosition)/\(currentText.count)")
+        
+        // 确保设置正确的恢复标志
+        if currentPlaybackPosition > 0 {
+            isResuming = true
+            print("设置恢复标志isResuming=true，下次点击播放将从位置 \(currentPlaybackPosition) 开始")
+        }
+        
+        // 设置手动暂停标志，防止自动触发下一篇
+        speechDelegate.wasManuallyPaused = true
+        
         // 记录下播放位置
         if !synthesizer.isPaused {
             synthesizer.pauseSpeaking(at: .immediate)
+        }
+        
+        // 检查合成器是否仍在朗读
+        if synthesizer.isSpeaking {
+            print("⚠️ 警告：暂停后合成器仍在朗读，强制停止")
+            synthesizer.stopSpeaking(at: .immediate)
         }
         
         // 停止计时器
@@ -849,7 +1022,6 @@ class SpeechManager: ObservableObject {
         
         // 更新状态
         isPlaying = false
-        isResuming = true
         
         // 保存播放进度
         if let articleId = currentArticle?.id {
@@ -881,11 +1053,22 @@ class SpeechManager: ObservableObject {
     // 停止朗读
     func stopSpeaking(resetResumeState: Bool = true) {
         if synthesizer.isSpeaking {
+            // 保存当前播放进度（在重置之前）
+            savePlaybackProgress()
+            
+            // 添加检测逻辑：如果没有设置手动暂停标志，则这可能是系统自动停止
+            // 为防止触发自动播放下一篇的逻辑，设置手动暂停标志
+            if !speechDelegate.wasManuallyPaused && !speechDelegate.isArticleSwitching {
+                print("检测到未设置标志，设置wasManuallyPaused=true防止触发自动播放")
+                speechDelegate.wasManuallyPaused = true
+            }
+            
             synthesizer.stopSpeaking(at: .immediate)
             
             // 重置所有状态
             speechDelegate.isSpeaking = false
             speechDelegate.startPosition = 0
+            speechDelegate.isNearArticleEnd = false  // 确保重置接近文章末尾标志
             
             // 只有在指定需要重置恢复状态时才重置
             if resetResumeState {
@@ -1070,12 +1253,13 @@ class SpeechManager: ObservableObject {
                 currentTime = 0.0
                 speechDelegate.startPosition = 0
                 
-                // 设置标记，防止自动循环
+                // 设置标记，防止自动循环 - 使用新的标志
                 isProcessingNextArticle = true
-                speechDelegate.wasManuallyPaused = true
+                speechDelegate.wasManuallyPaused = false
+                speechDelegate.isNearArticleEnd = true
                 
                 // 停止当前播放
-                if synthesizer.isSpeaking {
+            if synthesizer.isSpeaking {
                     synthesizer.stopSpeaking(at: .immediate)
                     speechDelegate.isSpeaking = false
                     stopTimer()
@@ -1085,6 +1269,7 @@ class SpeechManager: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     // 重置标记，开始新播放
                     self.speechDelegate.wasManuallyPaused = false
+                    self.speechDelegate.isNearArticleEnd = false
                     self.speechDelegate.startPosition = 0
                     self.isProcessingNextArticle = false
                     
@@ -1113,6 +1298,7 @@ class SpeechManager: ObservableObject {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         // 重置标志，防止在新播放中错误地识别为手动暂停
                         self.speechDelegate.wasManuallyPaused = false
+                        self.speechDelegate.isNearArticleEnd = false
                         self.speechDelegate.startPosition = 0
                         
                         // 从头开始播放
@@ -1135,8 +1321,9 @@ class SpeechManager: ObservableObject {
                     
                     // 延迟发送播放下一篇通知
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // 重置标志
+                        // 重置标志 - 使用新的标志
                         self.speechDelegate.wasManuallyPaused = false
+                        self.speechDelegate.isNearArticleEnd = true
                         self.isProcessingNextArticle = true
                         
                         // 发送通知请求播放下一篇
@@ -1148,6 +1335,7 @@ class SpeechManager: ObservableObject {
                         // 延迟重置标志
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             self.isProcessingNextArticle = false
+                            self.speechDelegate.isNearArticleEnd = false
                         }
                     }
                 } else {
@@ -1161,7 +1349,7 @@ class SpeechManager: ObservableObject {
             }
         }
         
-        // 标记为手动操作，防止触发自动循环
+        // 标记为手动操作，防止触发自动循环 - 保留这个设置，因为在跳过到具体时间点的情况下需要这样做
         speechDelegate.wasManuallyPaused = true
         
         // 如果正在播放，则停止当前朗读并从新位置开始
@@ -1253,7 +1441,7 @@ class SpeechManager: ObservableObject {
         print("=====================================")
     }
     
-    // 保存播放进度
+    // 保存播放进度 - 可以被外部调用以确保在任何需要的时候保存进度
     func savePlaybackProgress() {
         if let articleId = currentArticle?.id {
             UserDefaults.standard.set(currentPlaybackPosition, forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
@@ -1288,10 +1476,11 @@ class SpeechManager: ObservableObject {
                     
                     self.currentTime = self.totalTime * self.currentProgress
                     
-                    // 每隔几秒保存一次播放进度
-                    if Int(self.currentTime) % 5 == 0 { // 每5秒保存一次
+                    // 每隔5分钟保存一次播放进度
+                    if Int(self.currentTime) % 300 == 0 && Int(self.currentTime) > 0 { // 每300秒（5分钟）保存一次
                         self.currentPlaybackPosition = currentPosition
                         self.savePlaybackProgress()
+                        print("自动保存播放进度 - 当前时间: \(self.formatTime(self.currentTime))")
                     }
                 }
             }
@@ -1367,8 +1556,46 @@ class SpeechManager: ObservableObject {
     
     // 更新播放列表
     func updatePlaylist(_ articles: [Article]) {
+        // 获取当前播放内容类型（文章或文档）
+        let contentType = UserDefaults.standard.string(forKey: "lastPlayedContentType") ?? "article"
+        print("========= SpeechManager.updatePlaylist =========")
+        print("更新播放列表，内容类型: \(contentType)")
+        
+        // 检查内容源ID
+        if !articles.isEmpty {
+            let contentSourceId = articles.first?.listId
+            let contentSourceIdString = contentSourceId?.uuidString ?? "无"
+            print("新播放列表内容源ID: \(contentSourceIdString)")
+            
+            // 检查与当前播放列表的内容源是否相同
+            if !lastPlayedArticles.isEmpty {
+                let currentSourceId = lastPlayedArticles.first?.listId
+                let currentSourceIdString = currentSourceId?.uuidString ?? "无"
+                print("当前播放列表内容源ID: \(currentSourceIdString)")
+                
+                if currentSourceId != contentSourceId {
+                    print("⚠️ 内容源发生变化: \(currentSourceIdString) -> \(contentSourceIdString)")
+                }
+            }
+        }
+        
+        print("播放列表文章数量: \(articles.count)")
+        if !articles.isEmpty {
+            print("播放列表第一篇: \(articles.first?.title ?? "无"), ID: \(articles.first?.id.uuidString ?? "无")")
+            print("播放列表最后一篇: \(articles.last?.title ?? "无"), ID: \(articles.last?.id.uuidString ?? "无")")
+        }
+
+        // 检查是否播放列表发生了变化
+        let isListChanged = lastPlayedArticles.map({ $0.id }) != articles.map({ $0.id })
+        if isListChanged {
+            print("播放列表已更改")
+        } else {
+            print("播放列表未变化")
+        }
+        
         lastPlayedArticles = articles
         saveLastPlayedArticles()
+        print("==================================")
     }
     
     // 保存当前播放位置
@@ -1397,20 +1624,72 @@ class SpeechManager: ObservableObject {
     
     // 重置播放标志，供外部调用
     func resetPlaybackFlags() {
-        isProcessingNextArticle = false
+        print("========= SpeechManager.resetPlaybackFlags =========")
+        
+        // 重置语音代理的标志
+        speechDelegate.wasManuallyPaused = false
+        speechDelegate.isNearArticleEnd = false
+        speechDelegate.isArticleSwitching = false
+        speechDelegate.startPosition = 0
+        
+        // 重置本地播放状态
+        isResuming = false
+        currentPlaybackPosition = 0
+        
+        print("已重置所有播放标志")
+        print("=======================================")
     }
     
     // 获取当前正在播放的文章
     func getCurrentArticle() -> Article? {
-        if let article = currentArticle {
-            print("SpeechManager.getCurrentArticle: 返回当前文章: \(article.title), ID: \(article.id)")
-            return article
-        } else if !lastPlayedArticles.isEmpty {
-            print("SpeechManager.getCurrentArticle: 当前文章为nil，返回播放列表中的第一篇文章")
-            return lastPlayedArticles.first
+        return currentArticle
+    }
+    
+    // 强制设置文章，忽略当前播放状态
+    func forceSetup(for article: Article) {
+        print("========= SpeechManager.forceSetup =========")
+        print("强制设置文章: \(article.title)")
+        print("文章ID: \(article.id.uuidString)")
+        
+        // 如果有文章正在播放，停止它
+        if isPlaying {
+            // 确保在停止之前设置标志，这样不会触发"播放完成"逻辑
+            speechDelegate.isArticleSwitching = true
+            print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+            
+            speechDelegate.wasManuallyPaused = true
+            stopSpeaking(resetResumeState: true)
+            
+            // 检查标志是否被意外重置
+            if !speechDelegate.isArticleSwitching {
+                print("⚠️ 警告：stopSpeaking后isArticleSwitching已被意外重置为false，重新设置为true")
+                speechDelegate.isArticleSwitching = true
+            }
         }
-        print("SpeechManager.getCurrentArticle: 没有可用的文章")
-        return nil
+        
+        // 保存当前文章引用
+        self.currentArticle = article
+        self.currentText = article.content
+        
+        // 更新UI显示的状态
+        self.currentProgress = 0.0
+        self.currentTime = 0.0
+        
+        // 估算总时长
+        let wordsPerMinute = 200.0 * selectedRate
+        let estimatedMinutes = Double(article.content.count) / wordsPerMinute
+        self.totalTime = estimatedMinutes * 60.0
+        
+        // 重置播放位置信息
+        self.currentPlaybackPosition = 0
+        self.isResuming = false
+        
+        // 确保代理状态重置
+        speechDelegate.startPosition = 0
+        speechDelegate.wasManuallyPaused = false
+        
+        print("强制设置完成，从头开始播放")
+        print("===================================")
     }
     
     // 强制更新UI状态（进度条和高亮）- 供外部调用
@@ -1460,6 +1739,19 @@ class SpeechManager: ObservableObject {
             print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 当前文章: \(currentArticle.title), ID: \(currentArticle.id)")
         } else {
             print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 没有当前文章")
+        }
+        
+        // 检查全局状态 - 是否有其他文章正在播放
+        let playbackManager = PlaybackManager.shared
+        let isGlobalPlayingDifferentContent = playbackManager.isPlaying && 
+                                              playbackManager.currentContentId != currentArticle?.id && 
+                                              playbackManager.currentContentId != nil
+        
+        // 如果全局有其他内容在播放，记录日志但不做改变
+        if isGlobalPlayingDifferentContent {
+            print("检测到全局有其他内容正在播放 - ID: \(playbackManager.currentContentId?.uuidString ?? "未知"), 标题: \(playbackManager.currentTitle)")
+            print("不更新全局状态，保持其播放状态")
+            return actualSpeakingState
         }
         
         // 如果合成器正在朗读，但UI状态不同步，记录额外信息帮助调试
@@ -1521,6 +1813,19 @@ class SpeechManager: ObservableObject {
             print("获取合成器状态 - 原始isSpeaking: \(isSpeaking), isPaused: \(isPaused), 实际播放状态: \(actualSpeakingState), 没有当前文章")
         }
         
+        // 检查全局状态 - 是否有其他文章正在播放
+        let playbackManager = PlaybackManager.shared
+        let isGlobalPlayingDifferentContent = playbackManager.isPlaying && 
+                                              playbackManager.currentContentId != currentArticle?.id && 
+                                              playbackManager.currentContentId != nil
+        
+        // 如果全局有其他内容在播放，记录日志但不做改变
+        if isGlobalPlayingDifferentContent {
+            print("检测到全局有其他内容正在播放 - ID: \(playbackManager.currentContentId?.uuidString ?? "未知"), 标题: \(playbackManager.currentTitle)")
+            print("不更新全局状态，保持其播放状态")
+            return actualSpeakingState
+        }
+        
         // 如果合成器正在朗读，但UI状态不同步，记录额外信息帮助调试
         if actualSpeakingState && !isPlaying {
             if let currentArticle = currentArticle {
@@ -1562,5 +1867,24 @@ class SpeechManager: ObservableObject {
         }
         
         return actualSpeakingState
+    }
+    
+    // 计算当前朗读位置
+    private func calculateCurrentPosition() -> Int {
+        // 首先尝试从高亮区域获取当前位置
+        if speechDelegate.highlightRange.location > 0 {
+            // 如果有高亮区域，使用它的位置
+            return speechDelegate.highlightRange.location
+        }
+        
+        // 如果没有高亮区域，根据进度估算位置
+        let estimatedPosition = Int(currentProgress * Double(currentText.count))
+        
+        // 如果进度接近0但已经开始播放了一段时间，使用默认的最小值
+        if estimatedPosition < 5 && currentTime > 2.0 {
+            return 5 // 假设至少已经朗读了几个字符
+        }
+        
+        return estimatedPosition
     }
 }

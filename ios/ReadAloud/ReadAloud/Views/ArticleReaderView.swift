@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import Combine
+// 自定义Slider组件在项目内部，无需特殊导入
 
 /// 文章阅读和朗读的主视图
 struct ArticleReaderView: View {
@@ -175,7 +176,7 @@ struct ArticleReaderView: View {
             Spacer()
             
             // 底部播放控制区域
-            VStack {
+            VStack(spacing: 5) {
                 // 时间显示
                 HStack {
                     Text(speechManager.formatTime(speechManager.currentTime))
@@ -184,87 +185,88 @@ struct ArticleReaderView: View {
                     Text(speechManager.formatTime(speechManager.totalTime))
                         .font(.caption)
                 }
+                .padding(.horizontal)
                 
-                // 进度控制区域
-                VStack(spacing: 5) {
-                    // 上次播放位置恢复提示
-                    if speechManager.isResuming && !speechManager.isPlaying && isAppLaunch {
-                        HStack {
-                            Button(action: {
-                                // 设置手动暂停标志，防止播放完成后自动跳转
-                                speechDelegate.wasManuallyPaused = true
-                                print("继续上次播放：设置wasManuallyPaused=true，防止播放完成后自动跳转")
-                                
-                                // 从保存的位置开始播放
-                                speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
-                                isAppLaunch = false
-                            }) {
-                                Label("继续上次播放", systemImage: "play.circle")
-                                    .foregroundColor(.blue)
-                            }
-                            .padding(.vertical, 5)
-                            .padding(.horizontal, 10)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
+                // 上次播放位置恢复提示
+                if speechManager.isResuming && !speechManager.isPlaying && isAppLaunch {
+                    HStack {
+                        Button(action: {
+                            // 设置手动暂停标志，防止播放完成后自动跳转
+                            speechDelegate.wasManuallyPaused = true
+                            print("继续上次播放：设置wasManuallyPaused=true，防止播放完成后自动跳转")
                             
-                            Spacer()
-                            
-                            // 从头开始按钮
-                            Button(action: {
-                                // 重置恢复状态并清除保存的进度
-                                speechManager.stopSpeaking()
-                                isAppLaunch = false
-                            }) {
-                                Text("从头开始")
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.vertical, 5)
-                            .padding(.horizontal, 10)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
+                            // 从保存的位置开始播放
+                            speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
+                            isAppLaunch = false
+                        }) {
+                            Label("继续上次播放", systemImage: "play.circle")
+                                .foregroundColor(.blue)
                         }
                         .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                        
+                        Spacer()
+                        
+                        // 从头开始按钮
+                        Button(action: {
+                            // 重置恢复状态并清除保存的进度
+                            speechManager.stopSpeaking()
+                            isAppLaunch = false
+                        }) {
+                            Text("从头开始")
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
                     }
+                    .padding(.horizontal)
+                }
+                
+                // 进度条和快进/快退按钮
+                HStack {
+                    // 后退15秒按钮
+                    Button(action: {
+                        speechManager.skipBackward(seconds: 15)
+                    }) {
+                        Image(systemName: "gobackward.15")
+                            .font(.system(size: 22))
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.trailing, 8)
                     
-                    // 进度条和快进/快退按钮
-                    HStack {
-                        // 后退15秒按钮
-                        Button(action: {
-                            speechManager.skipBackward(seconds: 15)
-                        }) {
-                            Image(systemName: "gobackward.15")
-                                .font(.system(size: 22))
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.trailing, 8)
-                        
-                        // 进度条，支持拖动
-                        Slider(
-                            value: $speechManager.currentProgress,
-                            in: 0...1,
-                            onEditingChanged: { editing in
-                                speechManager.isDragging = editing
-                                
-                                if !editing {
-                                    speechManager.seekToProgress(speechManager.currentProgress)
-                                }
+                    // 进度条，支持拖拽和点击
+                    SliderWithTapHandler(
+                        value: $speechManager.currentProgress,
+                        range: 0...1,
+                        onEditingChanged: { editing in
+                            speechManager.isDragging = editing
+                            
+                            if !editing {
+                                speechManager.seekToProgress(speechManager.currentProgress)
                             }
-                        )
-                        .accentColor(themeManager.isDarkMode ? .white : .blue)
-                        
-                        // 前进15秒按钮
-                        Button(action: {
-                            speechManager.skipForward(seconds: 15)
-                        }) {
-                            Image(systemName: "goforward.15")
-                                .font(.system(size: 22))
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.leading, 8)
+                        },
+                        onTap: { progress in
+                            // 点击处理
+                            speechManager.seekToProgress(progress)
+                        },
+                        accentColor: themeManager.isDarkMode ? .white : .blue
+                    )
+                    
+                    // 前进15秒按钮
+                    Button(action: {
+                        speechManager.skipForward(seconds: 15)
+                    }) {
+                        Image(systemName: "goforward.15")
+                            .font(.system(size: 22))
+                            .foregroundColor(.blue)
                     }
+                    .padding(.leading, 8)
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 10)
                 
                 // 播放控制区
                 HStack {
@@ -299,9 +301,44 @@ struct ArticleReaderView: View {
                     
                     // 播放/暂停按钮
                     Button(action: {
-                        if speechManager.isPlaying {
+                        // 获取全局播放状态
+                        let playbackManager = PlaybackManager.shared
+                        
+                        // 检查当前播放的是否为当前文章
+                        let isCurrentArticlePlaying = (speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id) ||
+                            (playbackManager.isPlaying && playbackManager.currentContentId == article.id)
+                        
+                        if isCurrentArticlePlaying {
+                            // 如果当前文章正在播放，则暂停播放
                             speechManager.pauseSpeaking()
                         } else {
+                            // 如果其他文章正在播放，先停止它
+                            if speechManager.isPlaying || playbackManager.isPlaying {
+                                print("检测到其他文章正在播放，先停止它再播放当前文章")
+                                
+                                // 设置切换文章标志，防止触发自动播放逻辑
+                                speechDelegate.isArticleSwitching = true
+                                print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+                                
+                                // 在停止当前播放前添加标记，表明这是因为切换文章而停止的
+                                speechDelegate.wasManuallyPaused = true
+                                
+                                // 使用强制设置方法替换原来的代码
+                                speechManager.forceSetup(for: article)
+                                
+                                // 添加一小段延迟，确保isArticleSwitching标志被正确处理
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    if speechDelegate.isArticleSwitching {
+                                        print("stopSpeaking后isArticleSwitching仍为true，这是正常的")
+                                    } else {
+                                        print("⚠️ 警告：stopSpeaking后isArticleSwitching已被重置为false")
+                                    }
+                                }
+                            } else {
+                                // 确保设置为当前文章
+                                speechManager.setup(for: article)
+                            }
+                            
                             // 检查语音语言是否匹配
                             let articleLanguage = article.detectLanguage()
                             if let voice = speechManager.getSelectedVoice() {
@@ -321,9 +358,32 @@ struct ArticleReaderView: View {
                                 // 从保存的位置开始播放，确保设置手动暂停标志为true
                                 // 防止播放完成时自动跳转到下一章
                                 speechDelegate.wasManuallyPaused = true
-                                speechManager.startSpeakingFromPosition(speechManager.currentPlaybackPosition)
+                                
+                                // 不要重置isArticleSwitching标志，而是使用一个延迟回调
+                                // 确保当前位置有效
+                                let position = max(0, min(speechManager.currentPlaybackPosition, article.content.count - 1))
+                                print("从保存的位置恢复播放: \(position)/\(article.content.count)")
+                                
+                                speechManager.startSpeakingFromPosition(position)
+                                
+                                // 在朗读真正开始后再重置标志
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                    if speechDelegate.isSpeaking {
+                                        print("朗读已经开始，现在才安全地重置isArticleSwitching=false")
+                                        speechDelegate.isArticleSwitching = false
+                                    }
+                                }
                             } else {
+                                // 不要重置isArticleSwitching标志，而是使用一个延迟回调
                                 speechManager.startSpeaking()
+                                
+                                // 在朗读真正开始后再重置标志
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                    if speechDelegate.isSpeaking {
+                                        print("朗读已经开始，现在才安全地重置isArticleSwitching=false")
+                                        speechDelegate.isArticleSwitching = false
+                                    }
+                                }
                             }
                             isAppLaunch = false
                         }
@@ -331,8 +391,11 @@ struct ArticleReaderView: View {
                         // 获取全局播放状态
                         let playbackManager = PlaybackManager.shared
                         // 判断是否应该显示为播放状态：本地播放状态或全局状态表明当前文章正在播放
-                        let shouldShowPlaying = speechManager.isPlaying || 
-                            (playbackManager.isPlaying && playbackManager.currentContentId == article.id)
+                        // 修改逻辑：只有当全局播放的是当前文章时才显示为播放状态
+                        // 将复杂表达式分解为多个条件，避免编译器错误
+                        let isLocalPlaying = speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id
+                        let isGlobalPlaying = playbackManager.isPlaying && playbackManager.currentContentId == article.id
+                        let shouldShowPlaying = isLocalPlaying || isGlobalPlaying
                         
                         Image(systemName: shouldShowPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .resizable()
@@ -369,7 +432,7 @@ struct ArticleReaderView: View {
                     
                     Spacer()
                 }
-                .padding(.bottom, 15)
+                .padding(.vertical, 10)
                 
                 // 设置按钮区域
                 HStack(spacing: 20) {
@@ -663,8 +726,41 @@ struct ArticleReaderView: View {
             print("ArticleReaderView 出现")
             print("当前文章ID: \(article.id)")
             
-            // 同步播放列表状态
-            self.syncPlaylistState()
+            // 获取当前文章所属的文档或列表ID
+            let currentContentSourceId = article.listId
+            print("当前文章所属内容源ID: \(currentContentSourceId?.uuidString ?? "无")")
+            
+            // 检查SpeechManager中的播放列表，确保与当前文章来自同一个内容源
+            if !speechManager.lastPlayedArticles.isEmpty {
+                let managerSourceId = speechManager.lastPlayedArticles.first?.listId
+                print("SpeechManager播放列表内容源ID: \(managerSourceId?.uuidString ?? "无")")
+                
+                // 如果内容源ID不匹配，强制更新播放列表
+                if managerSourceId != currentContentSourceId {
+                    print("⚠️ 检测到内容源不匹配，强制更新播放列表")
+                    
+                    // 获取当前文章所在的正确播放列表
+                    let articlesToPlay = listArticles
+                    print("设置播放列表为当前文章所在列表，包含 \(articlesToPlay.count) 篇文章")
+                    if !articlesToPlay.isEmpty {
+                        print("当前列表第一篇: \(articlesToPlay.first?.title ?? "无"), ID: \(articlesToPlay.first?.id.uuidString ?? "无")")
+                        print("当前列表最后一篇: \(articlesToPlay.last?.title ?? "无"), ID: \(articlesToPlay.last?.id.uuidString ?? "无")")
+                    }
+                    
+                    // 更新播放列表
+                    speechManager.updatePlaylist(articlesToPlay)
+                    currentListArticles = articlesToPlay
+                } else {
+                    // 内容源匹配，同步播放列表状态
+                    self.syncPlaylistState()
+                }
+            } else {
+                // SpeechManager的播放列表为空，设置新的播放列表
+                let articlesToPlay = listArticles
+                print("SpeechManager播放列表为空，设置新的播放列表，包含 \(articlesToPlay.count) 篇文章")
+                speechManager.updatePlaylist(articlesToPlay)
+                currentListArticles = articlesToPlay
+            }
             
             // 记录当前播放内容类型为文章
             UserDefaults.standard.set("article", forKey: "lastPlayedContentType")
@@ -735,25 +831,51 @@ struct ArticleReaderView: View {
             // 初始化语音管理器
             speechManager.setup(for: article)
             
-            // 在初始化后，检查当前文章是否正在全局播放
+            // 在初始化后，检查全局播放状态
             let playbackManager = PlaybackManager.shared
-            if playbackManager.isPlaying && playbackManager.currentContentId == article.id {
+            
+            // 新增: 检查全局是否有其他文章在播放
+            if playbackManager.isPlaying && playbackManager.currentContentId != article.id {
+                print("⚠️ 检测到全局有其他文章正在播放 - ID: \(playbackManager.currentContentId?.uuidString ?? "未知"), 标题: \(playbackManager.currentTitle)")
+                print("保留全局播放状态，不自动开始播放当前文章")
+                
+                // 确保本地UI显示为暂停状态
+                speechManager.isPlaying = false
+                
+                // 额外提示: 不进行状态检查和同步
+                print("跳过状态检查和同步，保持当前全局播放")
+            } else if playbackManager.isPlaying && playbackManager.currentContentId == article.id {
+                // 如果全局正在播放当前文章，同步本地UI
                 print("检测到当前文章正在全局播放，同步更新本地播放状态")
                 speechManager.isPlaying = true
                 speechManager.objectWillChange.send()
-            }
-            
-            // 强制立即刷新进度条和高亮状态
-            if speechManager.isResuming {
-                print("立即刷新进度条：位置 \(speechManager.currentPlaybackPosition), 进度: \(Int(speechManager.currentProgress * 100))%")
                 
-                // 使用SpeechManager的forceUpdateUI方法强制更新UI
-                speechManager.forceUpdateUI()
+                // 强制立即刷新进度条和高亮状态
+                if speechManager.isResuming {
+                    print("立即刷新进度条：位置 \(speechManager.currentPlaybackPosition), 进度: \(Int(speechManager.currentProgress * 100))%")
+                    
+                    // 使用SpeechManager的forceUpdateUI方法强制更新UI
+                    speechManager.forceUpdateUI()
+                }
+                
+                // 进行单次完整的播放状态检查和同步
+                print("执行单次完整的播放状态检查和同步...")
+                checkAndSyncPlaybackState()
+            } else {
+                // 没有任何内容在播放，正常执行
+                
+                // 强制立即刷新进度条和高亮状态
+                if speechManager.isResuming {
+                    print("立即刷新进度条：位置 \(speechManager.currentPlaybackPosition), 进度: \(Int(speechManager.currentProgress * 100))%")
+                    
+                    // 使用SpeechManager的forceUpdateUI方法强制更新UI
+                    speechManager.forceUpdateUI()
+                }
+                
+                // 进行单次完整的播放状态检查和同步
+                print("执行单次完整的播放状态检查和同步...")
+                checkAndSyncPlaybackState()
             }
-            
-            // 进行单次完整的播放状态检查和同步，而不是多次重复检查
-            print("执行单次完整的播放状态检查和同步...")
-            checkAndSyncPlaybackState()
             
             // 通知已进入播放界面
             NotificationCenter.default.post(name: Notification.Name("EnterPlaybackView"), object: nil)
@@ -768,6 +890,19 @@ struct ArticleReaderView: View {
             showTabBar()
             
             print("========= ArticleReaderView.onDisappear =========")
+            
+            // 记录离开播放界面的时间戳
+            UserDefaults.standard.set(Date(), forKey: "lastExitPlaybackViewTime")
+            
+            // 重要: 禁用文档库加载，防止返回到文章列表时加载文档库
+            // 获取FileReadView中的isDocumentLoadingDisabled变量并设置为true
+            // 由于无法直接修改另一个文件中的private变量，使用通知方式
+            NotificationCenter.default.post(
+                name: Notification.Name("DisableDocumentLoading"),
+                object: nil,
+                userInfo: ["disabled": true]
+            )
+            print("已发送禁用文档库加载的通知")
             
             // 取消订阅
             self.playNextSubscription?.cancel()
@@ -820,15 +955,28 @@ struct ArticleReaderView: View {
                 currentArticleId: article.id,
                 onSelectArticle: { selectedArticle in
                     print("选择了章节: \(selectedArticle.title)")
+                    print("选择的章节ID: \(selectedArticle.id), 当前章节ID: \(article.id)")
+                    
+                    // 检查是否是选择了与当前相同的章节
+                    if selectedArticle.id == article.id {
+                        print("选择了当前正在显示的章节，无需切换")
+                        return
+                    }
+                    
+                    // 设置切换文章标志，防止触发自动播放逻辑
+                    // 注意：这个标志会在播放完成时检查，所以在整个过程中都不要重置它
+                    speechDelegate.isArticleSwitching = true
+                    print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
                     
                     // 停止当前播放
                     if speechManager.isPlaying {
                         speechManager.stopSpeaking(resetResumeState: true)
                     }
                     
-                    // 重置播放状态
+                    // 重置播放状态，但保留文章切换标志
                     speechDelegate.startPosition = 0
                     speechDelegate.wasManuallyPaused = false
+                    // 注意：不在这里重置isArticleSwitching
                     
                     // 保存最近播放的文章ID
                     UserDefaults.standard.set(selectedArticle.id.uuidString, forKey: UserDefaultsKeys.lastPlayedArticleId)
@@ -840,10 +988,22 @@ struct ArticleReaderView: View {
                     speechManager.setup(for: selectedArticle)
                     print("已切换到章节: \(selectedArticle.title)")
                     
-                    // 延迟一点开始播放
+                    // 延迟一点开始播放，确保之前的停止操作已完成
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         print("开始播放章节: \(selectedArticle.title)")
+                        // 不要在这里重置文章切换标志
+                        // speechDelegate.isArticleSwitching = false
+                        // print("重置isArticleSwitching=false，准备开始新章节播放")
+                        
                         speechManager.startSpeaking()
+                        
+                        // 在朗读真正开始后再重置标志
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            if self.speechDelegate.isSpeaking {
+                                print("朗读已经开始，现在才安全地重置isArticleSwitching=false")
+                                self.speechDelegate.isArticleSwitching = false
+                            }
+                        }
                     }
                 },
                 isPresented: $showArticleList
@@ -928,6 +1088,10 @@ struct ArticleReaderView: View {
         
         // 确保完全停止当前播放，重置所有状态
         if speechManager.isPlaying {
+            // 设置切换文章标志，防止触发自动播放逻辑
+            speechDelegate.isArticleSwitching = true
+            print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+            
             // 设置标志防止触发循环播放
             speechDelegate.wasManuallyPaused = true
             // 停止当前播放但不重置恢复状态
@@ -936,6 +1100,9 @@ struct ArticleReaderView: View {
         
         // 清除可能存在的旧位置信息
         speechDelegate.startPosition = startPosition
+        
+        // 重置切换标志
+        speechDelegate.isArticleSwitching = false
         
         // 延迟一点开始播放，确保之前的停止操作已完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -950,8 +1117,15 @@ struct ArticleReaderView: View {
     
     // 滚动到当前高亮段落
     private func scrollToCurrentParagraph(scrollView: ScrollViewProxy) {
-        // 只有在正在朗读状态才进行滚动
-        if speechDelegate.isSpeaking {
+        // 获取全局播放状态
+        let playbackManager = PlaybackManager.shared
+        
+        // 只有在正在朗读状态且朗读的是当前文章时才进行滚动
+        // 将复杂条件拆分，避免编译器错误
+        let isGlobalPlayingCurrentArticle = playbackManager.isPlaying && playbackManager.currentContentId == article.id
+        let isLocalPlayingCurrentArticle = speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id
+        
+        if speechDelegate.isSpeaking && (isGlobalPlayingCurrentArticle || isLocalPlayingCurrentArticle) {
             if let paragraphId = getCurrentParagraphId(range: speechDelegate.highlightRange) {
                 withAnimation {
                     scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: 0.25))
@@ -1070,6 +1244,19 @@ struct ArticleReaderView: View {
             return
         }
         
+        // 重要：检查全局是否有其他文章在播放
+        if playbackManager.isPlaying && playbackManager.currentContentId != article.id {
+            print("检测到全局有其他文章正在播放(ID: \(playbackManager.currentContentId?.uuidString ?? "未知"))，保留其播放状态")
+            
+            // 确保本地UI状态与实际状态一致，但不更新全局状态
+            if isSpeaking != speechManager.isPlaying {
+                speechManager.isPlaying = isSpeaking
+                speechManager.objectWillChange.send()
+                print("仅更新本地UI状态为: \(isSpeaking ? "播放中" : "已暂停")，保留全局播放状态")
+            }
+            return
+        }
+        
         // 如果合成器在朗读但界面显示为暂停，更新界面状态
         if isSpeaking && !speechManager.isPlaying {
             print("检测到状态不同步：合成器正在朗读但UI显示为暂停状态，正在修复...")
@@ -1125,6 +1312,33 @@ struct ArticleReaderView: View {
         print("========= ArticleReaderView.playNextArticle =========")
         print("当前文章: \(article.title)")
         print("当前文章ID: \(article.id)")
+        
+        // 获取当前文章所属的文档或列表ID
+        let currentContentSourceId = article.listId
+        print("当前文章所属内容源ID: \(currentContentSourceId?.uuidString ?? "无")")
+        
+        // 检查播放列表中的文章是否与当前文章来自同一个内容源
+        if !currentListArticles.isEmpty {
+            // 获取播放列表中第一篇文章的内容源ID
+            let playlistSourceId = currentListArticles.first?.listId
+            print("播放列表内容源ID: \(playlistSourceId?.uuidString ?? "无")")
+            
+            // 如果内容源ID不匹配，需要更新播放列表
+            if playlistSourceId != currentContentSourceId {
+                print("⚠️ 检测到内容源不匹配，重置播放列表")
+                
+                // 获取当前文章所在的正确播放列表
+                let articlesToPlay = listArticles
+                if !articlesToPlay.isEmpty {
+                    // 更新播放列表
+                    speechManager.updatePlaylist(articlesToPlay)
+                    // 同步到当前视图使用的列表
+                    currentListArticles = articlesToPlay
+                    print("已重置播放列表，文章数: \(articlesToPlay.count)")
+                }
+            }
+        }
+        
         print("列表文章数量: \(currentListArticles.count)")
         
         // 打印当前播放列表中所有文章的ID
@@ -1147,12 +1361,17 @@ struct ArticleReaderView: View {
         
         // 首先确保停止当前所有播放
         if speechManager.isPlaying {
+            // 设置切换文章标志，防止触发自动播放逻辑
+            speechDelegate.isArticleSwitching = true
+            print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+            
             speechManager.stopSpeaking(resetResumeState: true)
         }
         
         // 重置关键状态标志
         speechDelegate.startPosition = 0
         speechDelegate.wasManuallyPaused = false
+        speechDelegate.isArticleSwitching = false // 重置切换标志
         
         // 设置标记，表示这是从列表循环模式跳转的
         UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isFromListRepeat)
@@ -1257,6 +1476,33 @@ struct ArticleReaderView: View {
         print("========= ArticleReaderView.playPreviousArticle =========")
         print("当前文章: \(article.title)")
         print("当前文章ID: \(article.id)")
+        
+        // 获取当前文章所属的文档或列表ID
+        let currentContentSourceId = article.listId
+        print("当前文章所属内容源ID: \(currentContentSourceId?.uuidString ?? "无")")
+        
+        // 检查播放列表中的文章是否与当前文章来自同一个内容源
+        if !currentListArticles.isEmpty {
+            // 获取播放列表中第一篇文章的内容源ID
+            let playlistSourceId = currentListArticles.first?.listId
+            print("播放列表内容源ID: \(playlistSourceId?.uuidString ?? "无")")
+            
+            // 如果内容源ID不匹配，需要更新播放列表
+            if playlistSourceId != currentContentSourceId {
+                print("⚠️ 检测到内容源不匹配，重置播放列表")
+                
+                // 获取当前文章所在的正确播放列表
+                let articlesToPlay = listArticles
+                if !articlesToPlay.isEmpty {
+                    // 更新播放列表
+                    speechManager.updatePlaylist(articlesToPlay)
+                    // 同步到当前视图使用的列表
+                    currentListArticles = articlesToPlay
+                    print("已重置播放列表，文章数: \(articlesToPlay.count)")
+                }
+            }
+        }
+        
         print("列表文章数量: \(currentListArticles.count)")
         
         // 打印当前播放列表中所有文章的ID
@@ -1279,12 +1525,17 @@ struct ArticleReaderView: View {
         
         // 首先确保停止当前所有播放
         if speechManager.isPlaying {
+            // 设置切换文章标志，防止触发自动播放逻辑
+            speechDelegate.isArticleSwitching = true
+            print("已设置isArticleSwitching=true，防止触发自动播放逻辑")
+            
             speechManager.stopSpeaking(resetResumeState: true)
         }
         
         // 重置关键状态标志
         speechDelegate.startPosition = 0
         speechDelegate.wasManuallyPaused = false
+        speechDelegate.isArticleSwitching = false // 重置切换标志
         
         // 设置标记，表示这是从列表循环模式跳转的
         UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isFromListRepeat)

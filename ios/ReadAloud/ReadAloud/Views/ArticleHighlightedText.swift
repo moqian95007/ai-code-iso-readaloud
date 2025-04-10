@@ -70,6 +70,16 @@ struct ArticleHighlightedText: View {
     private func paragraphContainsHighlight(paragraph: String, paragraphIndex: Int, paragraphs: [String]) -> Bool {
         // 当正在播放时使用highlightRange
         let speechDelegate = SpeechDelegate.shared
+        let playbackManager = PlaybackManager.shared
+        
+        // 检查当前打开的文章是否为正在播放的文章
+        if let currentArticle = speechManager.getCurrentArticle(), 
+           playbackManager.isPlaying && 
+           playbackManager.currentContentId != nil && 
+           playbackManager.currentContentId != currentArticle.id {
+            // 如果全局正在播放的不是当前文章，不显示高亮
+            return false
+        }
         
         if speechDelegate.isSpeaking {
             guard highlightRange.location != NSNotFound && highlightRange.length > 0 else {

@@ -37,6 +37,10 @@ struct MainTabView: View {
                     }
                 }
                 .tag(0)
+                // 存储当前选中标签，供子视图使用
+                .onAppear {
+                    UserDefaults.standard.set(0, forKey: "currentSelectedTab")
+                }
                 
                 // 文章列表页面
                 NavigationView {
@@ -50,6 +54,10 @@ struct MainTabView: View {
                     }
                 }
                 .tag(1)
+                // 存储当前选中标签，供子视图使用
+                .onAppear {
+                    UserDefaults.standard.set(1, forKey: "currentSelectedTab")
+                }
                 
                 // 个人页面
                 ProfileView()
@@ -60,6 +68,15 @@ struct MainTabView: View {
                         }
                     }
                     .tag(2)
+                    // 存储当前选中标签，供子视图使用
+                    .onAppear {
+                        UserDefaults.standard.set(2, forKey: "currentSelectedTab")
+                    }
+            }
+            // 当标签页变化时同步到UserDefaults
+            .onChange(of: selectedTab) { newValue in
+                UserDefaults.standard.set(newValue, forKey: "currentSelectedTab")
+                print("标签页切换到: \(newValue)")
             }
         }
         .fullScreenCover(isPresented: $isShowingArticleReader, onDismiss: {

@@ -74,7 +74,8 @@ struct ArticleListView: View {
                                 .padding()
                         }
                         Spacer()
-                        Text(article.title)
+                        // 显示文章所属列表的名称而不是章节名称
+                        Text(listManager.selectedList?.name ?? "阅读列表")
                             .font(.headline)
                             .lineLimit(1)
                         Spacer()
