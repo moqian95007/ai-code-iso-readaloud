@@ -139,15 +139,6 @@ struct ArticleReaderView: View {
         return [article]
     }
     
-    // 添加存储当前正在显示的段落ID
-    @State private var currentVisibleParagraphId: String? = nil
-    // 添加防抖变量，避免过于频繁的滚动
-    @State private var lastScrollTime: Date = Date()
-    
-    // 添加两个变量，用于跟踪连续滚动
-    @State private var consecutiveScrollCount: Int = 0
-    @State private var lastScrolledParagraph: Int = -1
-    
     var body: some View {
         VStack(spacing: 0) {
             // 文章正文区域
@@ -162,9 +153,6 @@ struct ArticleReaderView: View {
                             themeManager: themeManager
                         )
                         .padding(.horizontal)
-                    }
-                    .onChange(of: speechDelegate.highlightRange) { _ in
-                        scrollToCurrentParagraph(scrollView: scrollView)
                     }
                     .onAppear {
                         // 初始化时滚动到上次播放位置
@@ -1129,58 +1117,16 @@ struct ArticleReaderView: View {
         // 获取全局播放状态
         let playbackManager = PlaybackManager.shared
         
-        // 只有在正在朗读状态且朗读的是当前文章时才考虑滚动
+        // 只有在正在朗读状态且朗读的是当前文章时才进行滚动
+        // 将复杂条件拆分，避免编译器错误
         let isGlobalPlayingCurrentArticle = playbackManager.isPlaying && playbackManager.currentContentId == article.id
         let isLocalPlayingCurrentArticle = speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id
         
         if speechDelegate.isSpeaking && (isGlobalPlayingCurrentArticle || isLocalPlayingCurrentArticle) {
-            guard let paragraphId = getCurrentParagraphId(range: speechDelegate.highlightRange) else { return }
-            
-            // 提取段落索引
-            let paragraphIndex = Int(paragraphId.replacingOccurrences(of: "paragraph_", with: "")) ?? -1
-            
-            let now = Date()
-            let timeSinceLastScroll = now.timeIntervalSince(lastScrollTime)
-            
-            // 判断是否是新段落
-            let isNewParagraph = paragraphIndex != lastScrolledParagraph
-            
-            // 智能滚动条件:
-            // 1. 初始滚动 (currentVisibleParagraphId 为空)
-            // 2. 新段落 且 距上次滚动超过0.5秒
-            // 3. 段落跳转超过一个段落
-            let shouldScroll = currentVisibleParagraphId == nil || 
-                              (isNewParagraph && timeSinceLastScroll > 0.5) ||
-                              (isNewParagraph && abs(paragraphIndex - lastScrolledParagraph) > 1)
-            
-            if shouldScroll {
-                // 更新滚动状态
-                currentVisibleParagraphId = paragraphId
-                lastScrollTime = now
-                
-                // 计算是否是连续滚动
-                if isNewParagraph {
-                    if paragraphIndex == lastScrolledParagraph + 1 {
-                        // 连续向下滚动
-                        consecutiveScrollCount += 1
-                    } else {
-                        // 不是连续滚动，重置计数
-                        consecutiveScrollCount = 0
-                    }
-                    
-                    // 更新最后滚动的段落
-                    lastScrolledParagraph = paragraphIndex
+            if let paragraphId = getCurrentParagraphId(range: speechDelegate.highlightRange) {
+                withAnimation {
+                    scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: 0.25))
                 }
-                
-                // 根据连续滚动次数动态调整锚点，实现越滚越少的效果
-                // 连续滚动越多次，锚点Y值越大，在视图中的位置越靠下
-                let dynamicAnchor: CGFloat = min(0.3 + CGFloat(min(consecutiveScrollCount, 5)) * 0.05, 0.6)
-                
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: dynamicAnchor))
-                }
-                
-                print("滚动到段落: \(paragraphId), 锚点: \(dynamicAnchor), 连续计数: \(consecutiveScrollCount)")
             }
         }
     }
