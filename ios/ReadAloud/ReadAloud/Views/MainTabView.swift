@@ -142,6 +142,18 @@ struct MainTabView: View {
                 }
             }
         }
+        // 监听文章清空通知，重新加载文章
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ArticlesCleared"))) { _ in
+            print("接收到文章清空通知，重新加载文章数据")
+            // 重新从UserDefaults加载文章（现在应该是空的）
+            articleManager.loadArticles()
+        }
+        // 监听文章数据重新加载通知
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ReloadArticlesData"))) { _ in
+            print("MainTabView收到ReloadArticlesData通知，重新加载文章数据")
+            // 重新从UserDefaults加载文章
+            articleManager.loadArticles()
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("OpenArticle"))) { notification in
             print("========= MainTabView收到OpenArticle通知 =========")
             

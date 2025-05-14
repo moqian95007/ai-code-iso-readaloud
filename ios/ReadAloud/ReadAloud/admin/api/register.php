@@ -107,7 +107,7 @@ if (!isset($verificationData['verified']) || $verificationData['verified'] != 1)
 }
 
 // 检查邮箱是否已存在
-$stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+$stmt = $conn->prepare("SELECT id FROM users WHERE email = ? AND login_type = 'email'");
 $stmt->bind_param("s", $email);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -140,9 +140,13 @@ $password_hash = password_hash($password, PASSWORD_DEFAULT);
 $status = 'active';
 $currentTime = date('Y-m-d H:i:s');
 
+// 使用邮箱作为account_id
+$login_type = 'email';
+$account_id = $email;
+
 // 插入用户数据
-$stmt = $conn->prepare("INSERT INTO users (username, password, email, register_date, last_login, status) VALUES (?, ?, ?, ?, ?, ?)");
-$stmt->bind_param("ssssss", $username, $password_hash, $email, $currentTime, $currentTime, $status);
+$stmt = $conn->prepare("INSERT INTO users (username, password, email, account_id, login_type, register_date, last_login, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("ssssssss", $username, $password_hash, $email, $account_id, $login_type, $currentTime, $currentTime, $status);
 
 if ($stmt->execute()) {
     $user_id = $conn->insert_id;

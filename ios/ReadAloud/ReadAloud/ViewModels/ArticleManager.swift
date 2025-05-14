@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 // 管理文章数据的类
 class ArticleManager: ObservableObject, ArticleManaging {
@@ -10,10 +11,21 @@ class ArticleManager: ObservableObject, ArticleManaging {
     private let saveKey = "savedArticles"
     private let listManager: ArticleListManaging
     
+    // 用于存储订阅
+    private var cancellables = Set<AnyCancellable>()
+    
     // 修改初始化方法，接受依赖注入
     init(listManager: ArticleListManaging = ArticleListManager.shared) {
         self.listManager = listManager
         loadArticles()
+        
+        // 订阅ReloadArticlesData通知
+        NotificationCenter.default.publisher(for: Notification.Name("ReloadArticlesData"))
+            .sink { [weak self] _ in
+                print("ArticleManager收到ReloadArticlesData通知，重新加载文章数据")
+                self?.loadArticles()
+            }
+            .store(in: &cancellables)
     }
     
     // 从本地存储加载文章
@@ -21,11 +33,13 @@ class ArticleManager: ObservableObject, ArticleManaging {
         if let data = UserDefaults.standard.data(forKey: saveKey) {
             if let decoded = try? JSONDecoder().decode([Article].self, from: data) {
                 self.articles = decoded
+                print("成功从本地加载\(decoded.count)篇文章")
                 return
             }
         }
         // 如果没有数据或解码失败，使用空数组
         self.articles = []
+        print("本地没有文章数据或解码失败，使用空数组")
     }
     
     // 保存文章到本地存储

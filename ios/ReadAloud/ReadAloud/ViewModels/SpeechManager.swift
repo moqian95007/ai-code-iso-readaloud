@@ -183,6 +183,14 @@ class SpeechManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.setupPlaybackManagerObserver()
         }
+        
+        // 监听用户登录后的数据重载通知
+        NotificationCenter.default.publisher(for: Notification.Name("ReloadArticlesData"))
+            .sink { [weak self] _ in
+                print("SpeechManager收到ReloadArticlesData通知，重新加载上次播放列表")
+                self?.loadLastPlayedArticles()
+            }
+            .store(in: &cancellables)
     }
     
     // 设置音频会话
@@ -1886,5 +1894,32 @@ class SpeechManager: ObservableObject {
         }
         
         return estimatedPosition
+    }
+    
+    // 清空播放列表和相关状态
+    func clearPlaylist() {
+        // 停止当前播放
+        if isPlaying {
+            stopSpeaking()
+        }
+        
+        // 清空播放列表
+        lastPlayedArticles = []
+        
+        // 保存空的播放列表
+        saveLastPlayedArticles()
+        
+        // 重置播放状态
+        currentProgress = 0.0
+        currentTime = 0.0
+        totalTime = 0.0
+        currentPlaybackPosition = 0
+        isResuming = false
+        
+        // 清空当前文章
+        currentArticle = nil
+        currentText = ""
+        
+        print("播放列表和相关状态已清空")
     }
 }

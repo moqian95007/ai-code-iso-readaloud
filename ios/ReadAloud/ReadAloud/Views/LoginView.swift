@@ -188,9 +188,9 @@ struct LoginView: View {
     
     private func signInWithApple() {
         // 使用AppleSignInHandler处理Apple登录流程
-        AppleSignInHandler.shared.startSignInWithAppleFlow(onSuccess: { idToken, nonce, email, fullName in
+        AppleSignInHandler.shared.startSignInWithAppleFlow(onSuccess: { idToken, nonce, email, fullName, appleUserId in
             // 登录成功后调用UserManager的Apple登录方法
-            userManager.loginWithApple(idToken: idToken, nonce: nonce, email: email, fullName: fullName)
+            userManager.loginWithApple(idToken: idToken, nonce: nonce, email: email, fullName: fullName, appleUserId: appleUserId)
         }, onError: { error in
             // 登录失败显示错误
             userManager.error = error.localizedDescription
@@ -198,17 +198,19 @@ struct LoginView: View {
     }
     
     private func signInWithGoogle() {
-        // 模拟Google登录成功
-        print("使用Google登录")
-        
-        // 在实际应用中，这里会调用Google SDK或WebView进行授权
-        // 这里仅作演示，直接模拟登录成功
-        let simulatedEmail = "google_user@example.com"
-        let simulatedName = "Google User"
-        let simulatedIdToken = "simulated_google_id_token"
-        
-        // 调用UserManager的Google登录方法
-        userManager.loginWithGoogle(idToken: simulatedIdToken, email: simulatedEmail, name: simulatedName)
+        // 使用GoogleSignInHandler启动Google登录流程
+        GoogleSignInHandler.shared.startSignInWithGoogleFlow(
+            onSuccess: { (idToken, email, name) in
+                print("Google登录成功：用户 \(name)，邮箱 \(email)")
+                
+                // 调用API进行Google登录
+                userManager.loginWithGoogle(idToken: idToken, email: email, name: name)
+            },
+            onError: { errorMessage in
+                // 更新错误状态
+                userManager.error = errorMessage
+            }
+        )
     }
 }
 
@@ -224,7 +226,7 @@ class AppleSignInHandler: NSObject {
     static let shared = AppleSignInHandler()
     
     // 回调闭包
-    private var onSuccessHandler: ((String, String, String, String) -> Void)?
+    private var onSuccessHandler: ((String, String, String, String, String) -> Void)?
     private var onErrorHandler: ((Error) -> Void)?
     
     // 保存当前nonce
@@ -232,9 +234,9 @@ class AppleSignInHandler: NSObject {
     
     /// 开始Apple登录流程
     /// - Parameters:
-    ///   - onSuccess: 成功回调，返回(idToken, nonce, email, fullName)
+    ///   - onSuccess: 成功回调，返回(idToken, nonce, email, fullName, appleUserId)
     ///   - onError: 失败回调，返回错误信息
-    func startSignInWithAppleFlow(onSuccess: @escaping (String, String, String, String) -> Void, onError: @escaping (Error) -> Void) {
+    func startSignInWithAppleFlow(onSuccess: @escaping (String, String, String, String, String) -> Void, onError: @escaping (Error) -> Void) {
         self.onSuccessHandler = onSuccess
         self.onErrorHandler = onError
         
@@ -267,6 +269,29 @@ extension AppleSignInHandler: ASAuthorizationControllerDelegate, ASAuthorization
     
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            // 打印完整的Apple凭证信息
+            print("------- Apple登录详细信息 -------")
+            print("User ID: \(appleIDCredential.user)")
+            print("Full Name: \(String(describing: appleIDCredential.fullName))")
+            print("Email: \(String(describing: appleIDCredential.email))")
+            print("实名认证状态: \(String(describing: appleIDCredential.realUserStatus.rawValue))")
+            
+            if let fullName = appleIDCredential.fullName {
+                print("First Name: \(String(describing: fullName.givenName))")
+                print("Middle Name: \(String(describing: fullName.middleName))")
+                print("Last Name: \(String(describing: fullName.familyName))")
+                print("Nickname: \(String(describing: fullName.nickname))")
+                print("Name Prefix: \(String(describing: fullName.namePrefix))")
+                print("Name Suffix: \(String(describing: fullName.nameSuffix))")
+            }
+            
+            if let authorizationCode = appleIDCredential.authorizationCode {
+                let authCodeString = String(data: authorizationCode, encoding: .utf8) ?? "N/A"
+                print("Authorization Code: \(authCodeString)")
+            }
+            
+            print("------- Apple登录详细信息结束 -------")
+            
             guard let nonce = currentNonce else {
                 print("无效的状态：登录回调时没有nonce")
                 let error = NSError(domain: "AppleSignIn", code: -1, userInfo: [NSLocalizedDescriptionKey: "无效的状态：登录回调时没有nonce"])
@@ -295,17 +320,49 @@ extension AppleSignInHandler: ASAuthorizationControllerDelegate, ASAuthorization
             if let firstName = appleIDCredential.fullName?.givenName,
                let lastName = appleIDCredential.fullName?.familyName {
                 fullName = "\(firstName) \(lastName)"
+            } else if let firstName = appleIDCredential.fullName?.givenName {
+                fullName = firstName
+            } else if let lastName = appleIDCredential.fullName?.familyName {
+                fullName = lastName
+            } else {
+                // 如果没有名字信息，使用user标识符的一部分作为用户名
+                fullName = "AppleUser_\(appleIDCredential.user.prefix(5))"
             }
             
-            print("Apple登录成功: 邮箱 \(email), 名称 \(fullName)")
+            print("Apple登录成功: 邮箱 \(email), 名称 \(fullName), User ID: \(appleIDCredential.user)")
             
             // 调用成功回调
-            onSuccessHandler?(idTokenString, nonce, email, fullName)
+            onSuccessHandler?(idTokenString, nonce, email, fullName, appleIDCredential.user)
         }
     }
     
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         print("Apple登录失败: \(error.localizedDescription)")
-        onErrorHandler?(error)
+        
+        // 处理特定类型的错误
+        if let authError = error as? ASAuthorizationError {
+            switch authError.code {
+            case .canceled:
+                print("用户取消了登录")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "用户取消了登录"]))
+            case .invalidResponse:
+                print("无效的响应")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "无效的响应"]))
+            case .notHandled:
+                print("请求未被处理")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "请求未被处理"]))
+            case .failed:
+                print("授权失败")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "授权失败"]))
+            case .notInteractive:
+                print("请求需要交互但无法显示")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "请求需要交互但无法显示"]))
+            @unknown default:
+                print("未知错误: \(authError.code.rawValue)")
+                onErrorHandler?(NSError(domain: "AppleSignIn", code: authError.code.rawValue, userInfo: [NSLocalizedDescriptionKey: "未知错误: \(authError.code.rawValue)"]))
+            }
+        } else {
+            onErrorHandler?(error)
+        }
     }
 } 

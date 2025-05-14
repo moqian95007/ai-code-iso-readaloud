@@ -273,7 +273,7 @@ struct RegisterView: View {
             return
         }
         
-        userManager.sendVerificationCode(email: email)
+        userManager.sendVerificationCode(to: email)
         
         // 开始60秒倒计时
         cooldownTime = 60
@@ -300,7 +300,7 @@ struct RegisterView: View {
             return
         }
         
-        userManager.verifyCode(email: email, verificationCode: verificationCode)
+        userManager.verifyCode(email: email, code: verificationCode)
     }
     
     /// 完成注册
@@ -309,7 +309,7 @@ struct RegisterView: View {
             return
         }
         
-        userManager.completeRegistration(password: password)
+        userManager.completeRegistration(email: email, password: password)
     }
     
     /// 验证密码

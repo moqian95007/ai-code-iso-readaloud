@@ -345,6 +345,112 @@ class NetworkManager {
             .eraseToAnyPublisher()
     }
     
+    /// 使用Apple ID登录
+    /// - Parameters:
+    ///   - idToken: Apple ID令牌
+    ///   - nonce: 加密nonce
+    ///   - email: 邮箱
+    ///   - fullName: 用户全名
+    ///   - appleUserId: Apple用户ID
+    /// - Returns: 包含User对象的Publisher
+    func loginWithApple(idToken: String, nonce: String, email: String, fullName: String, appleUserId: String) -> AnyPublisher<User, NetworkError> {
+        let parameters: [String: Any] = [
+            "id_token": idToken,
+            "nonce": nonce,
+            "email": email,
+            "full_name": fullName,
+            "apple_user_id": appleUserId,
+            "login_type": "apple"
+        ]
+        
+        print("发送Apple登录请求 - 参数: \(parameters)")
+        
+        return request(endpoint: "/third_party_login.php", method: "POST", parameters: parameters)
+            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .mapError { error -> NetworkError in
+                if let decodingError = error as? DecodingError {
+                    print("解码错误: \(decodingError)")
+                    return .decodingError(decodingError)
+                } else if let networkError = error as? NetworkError {
+                    return networkError
+                } else {
+                    print("未知错误: \(error)")
+                    return .networkError(error)
+                }
+            }
+            .flatMap { response -> AnyPublisher<User, NetworkError> in
+                if response.status == "success", let user = response.data {
+                    return Just(user)
+                        .setFailureType(to: NetworkError.self)
+                        .eraseToAnyPublisher()
+                } else {
+                    return Fail(error: .apiError(response.message ?? "Apple登录失败"))
+                        .eraseToAnyPublisher()
+                }
+            }
+            .catch { [weak self] error -> AnyPublisher<User, NetworkError> in
+                // 如果遇到网络错误且尚未使用备用URL，尝试使用备用URL
+                if case NetworkError.networkError(_) = error, let self = self, !self.useBackupURL {
+                    print("主URL失败，尝试使用备用URL")
+                    self.useBackupURL = true
+                    return self.loginWithApple(idToken: idToken, nonce: nonce, email: email, fullName: fullName, appleUserId: appleUserId)
+                }
+                return Fail(error: error).eraseToAnyPublisher()
+            }
+            .eraseToAnyPublisher()
+    }
+    
+    /// 使用Google账号登录
+    /// - Parameters:
+    ///   - idToken: Google ID令牌
+    ///   - email: 邮箱
+    ///   - name: 用户名
+    /// - Returns: 包含User对象的Publisher
+    func loginWithGoogle(idToken: String, email: String, name: String) -> AnyPublisher<User, NetworkError> {
+        let parameters: [String: Any] = [
+            "id_token": idToken,
+            "email": email,
+            "full_name": name,
+            "login_type": "google"
+        ]
+        
+        print("发送Google登录请求 - 参数: \(parameters)")
+        
+        return request(endpoint: "/third_party_login.php", method: "POST", parameters: parameters)
+            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .mapError { error -> NetworkError in
+                if let decodingError = error as? DecodingError {
+                    print("解码错误: \(decodingError)")
+                    return .decodingError(decodingError)
+                } else if let networkError = error as? NetworkError {
+                    return networkError
+                } else {
+                    print("未知错误: \(error)")
+                    return .networkError(error)
+                }
+            }
+            .flatMap { response -> AnyPublisher<User, NetworkError> in
+                if response.status == "success", let user = response.data {
+                    return Just(user)
+                        .setFailureType(to: NetworkError.self)
+                        .eraseToAnyPublisher()
+                } else {
+                    return Fail(error: .apiError(response.message ?? "Google登录失败"))
+                        .eraseToAnyPublisher()
+                }
+            }
+            .catch { [weak self] error -> AnyPublisher<User, NetworkError> in
+                // 如果遇到网络错误且尚未使用备用URL，尝试使用备用URL
+                if case NetworkError.networkError(_) = error, let self = self, !self.useBackupURL {
+                    print("主URL失败，尝试使用备用URL")
+                    self.useBackupURL = true
+                    return self.loginWithGoogle(idToken: idToken, email: email, name: name)
+                }
+                return Fail(error: error).eraseToAnyPublisher()
+            }
+            .eraseToAnyPublisher()
+    }
+    
     // MARK: - 私有辅助方法
     
     /// 通用网络请求方法

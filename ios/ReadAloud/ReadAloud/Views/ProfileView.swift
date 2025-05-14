@@ -20,16 +20,23 @@ struct ProfileView: View {
                 
                 // 用户名或登录按钮
                 if userManager.isLoggedIn, let user = userManager.currentUser {
-                    // 显示用户名
-                    Text(user.username)
-                        .font(.title)
-                        .fontWeight(.bold)
+                    // 显示用户头像和信息区域
+                    VStack(spacing: 10) {
+                        // 显示用户名（如果有）
+                        if !user.username.isEmpty {
+                            Text(user.username)
+                                .font(.title)
+                                .fontWeight(.bold)
+                        }
                         
-                    // 电子邮箱
-                    Text(user.email)
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .padding(.bottom, 10)
+                        // 显示电子邮箱（如果有）
+                        if !user.email.isEmpty {
+                            Text(user.email)
+                                .font(.subheadline)
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(.bottom, 10)
                 } else {
                     // 显示登录/注册按钮
                     Button(action: {

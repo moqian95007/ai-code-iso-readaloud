@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 /// 管理文章列表分类的类
 class ArticleListManager: ObservableObject, ArticleListManaging {
@@ -11,6 +12,9 @@ class ArticleListManager: ObservableObject, ArticleListManaging {
     
     private let saveKey = "savedArticleLists"
     private let selectedListKey = "selectedArticleList"
+    
+    // 用于存储订阅
+    private var cancellables = Set<AnyCancellable>()
     
     // 仅获取用户创建的列表（过滤掉文档创建的列表）
     var userLists: [ArticleList] {
@@ -39,6 +43,14 @@ class ArticleListManager: ObservableObject, ArticleListManaging {
             // 如果没有保存选择，使用第一个用户列表
             selectedListId = userLists.first?.id
         }
+        
+        // 订阅ReloadArticlesData通知
+        NotificationCenter.default.publisher(for: Notification.Name("ReloadArticlesData"))
+            .sink { [weak self] _ in
+                print("ArticleListManager收到ReloadArticlesData通知，重新加载列表数据")
+                self?.loadLists()
+            }
+            .store(in: &cancellables)
     }
     
     // 从本地存储加载文章列表
@@ -46,11 +58,13 @@ class ArticleListManager: ObservableObject, ArticleListManaging {
         if let data = UserDefaults.standard.data(forKey: saveKey) {
             if let decoded = try? JSONDecoder().decode([ArticleList].self, from: data) {
                 self.lists = decoded
+                print("成功从本地加载\(decoded.count)个文章列表")
                 return
             }
         }
         // 如果没有数据或解码失败，使用空数组
         self.lists = []
+        print("本地没有列表数据或解码失败，使用空数组")
     }
     
     // 保存文章列表到本地存储
