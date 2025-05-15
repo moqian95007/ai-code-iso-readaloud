@@ -201,6 +201,7 @@ $conn->close();
             <ul>
                 <li><a href="dashboard.php">仪表盘</a></li>
                 <li><a href="users.php">用户管理</a></li>
+                <li><a href="subscriptions.php">订阅管理</a></li>
                 <li><a href="user_data.php">用户数据</a></li>
                 <li><a href="api.php">API接口</a></li>
             </ul>
@@ -247,6 +248,11 @@ $conn->close();
                         <div class="form-group">
                             <label>最后登录</label>
                             <input type="text" value="<?php echo $user['last_login']; ?>" readonly>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>订阅管理</label>
+                            <a href="subscriptions.php?user_id=<?php echo $user['id']; ?>" class="btn btn-primary" style="display: inline-block; text-decoration: none; margin-top: 5px;">查看用户订阅</a>
                         </div>
                         
                         <div class="buttons">

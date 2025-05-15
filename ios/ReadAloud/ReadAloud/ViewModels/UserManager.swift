@@ -485,6 +485,9 @@ class UserManager: ObservableObject {
     func logout() {
         print("========= 开始用户登出流程 =========")
         
+        // 保存当前用户ID用于清除订阅数据
+        let currentUserId = currentUser?.id
+        
         // 先同步本地数据到远程服务器
         if let user = currentUser, user.id > 0, let token = user.token {
             print("登出前先同步本地数据到远程服务器")
@@ -528,8 +531,17 @@ class UserManager: ObservableObject {
         isLoggedIn = false
         clearUserFromStorage()
         
+        // 清除订阅数据
+        if let userId = currentUserId, userId > 0 {
+            print("清除用户ID为\(userId)的订阅数据")
+            SubscriptionRepository.shared.clearSubscriptions(for: userId)
+        }
+        
         // 清空所有列表中的文章
         clearArticlesFromLists()
+        
+        // 发送登出通知
+        NotificationCenter.default.post(name: Notification.Name("UserLoggedOut"), object: nil)
         
         print("========= 用户登出流程完成 =========")
     }
@@ -624,44 +636,56 @@ class UserManager: ObservableObject {
     
     // MARK: - 数据同步
     
-    /// 从远程服务器同步数据到本地
+    /// 从远程同步数据到本地
     /// - Parameters:
-    ///   - user: 当前用户
+    ///   - user: 用户对象
     ///   - completion: 完成回调
-    private func syncRemoteDataToLocal(user: User, completion: @escaping () -> Void) {
-        guard user.id > 0, let token = user.token else {
+    private func syncRemoteDataToLocal(user: User, completion: (() -> Void)? = nil) {
+        guard user.id > 0, let token = user.token, !token.isEmpty else {
             print("无法从远程同步数据: 用户ID或令牌无效")
-            completion()
+            completion?()
             return
         }
         
-        print("开始从远程服务器同步数据到本地 - 用户ID: \(user.id)")
-        
-        // 创建一个DispatchGroup来追踪所有同步任务
+        // 创建一个组来追踪所有同步任务
         let syncGroup = DispatchGroup()
         
-        // 同步文章列表
+        // 1. 清除旧的本地订阅数据
+        SubscriptionRepository.shared.clearSubscriptions(for: user.id)
+        
+        // 2. 从远程加载订阅数据
         syncGroup.enter()
-        syncRemoteArticleListsToLocal(userId: user.id, token: token) {
-            syncGroup.leave()
+        DispatchQueue.main.async {
+            // 加载订阅数据
+            print("开始从远程加载订阅数据...")
+            SubscriptionRepository.shared.loadSubscriptionsForUser(user.id)
+            
+            // 由于loadSubscriptionsForUser是异步操作，我们需要等待一段时间再离开组
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                syncGroup.leave()
+            }
         }
         
-        // 同步文章内容
+        // 3. 同步文章数据
         syncGroup.enter()
         syncRemoteArticlesToLocal(userId: user.id, token: token) {
             syncGroup.leave()
         }
         
-        // 同步文章分类信息
+        // 5. 同步文章列表
         syncGroup.enter()
-        syncRemoteArticleCategoriesToLocal(userId: user.id, token: token) {
+        syncRemoteArticleListsToLocal(userId: user.id, token: token) {
             syncGroup.leave()
         }
         
-        // 当所有同步任务完成后调用completion
+        // 当所有任务完成后调用completion
         syncGroup.notify(queue: .main) {
-            print("从远程同步数据到本地完成")
-            completion()
+            print("所有远程数据同步到本地完成")
+            
+            // 发送通知以更新界面显示
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            
+            completion?()
         }
     }
     
@@ -835,9 +859,6 @@ class UserManager: ObservableObject {
         syncArticleLists(userId: user.id, token: token) {
             syncGroup.leave()
         }
-        
-        // 不再同步文章分类信息
-        // syncArticleCategories(userId: user.id, token: token)
         
         // 只同步文章内容
         syncGroup.enter()
@@ -1225,190 +1246,6 @@ class UserManager: ObservableObject {
         }
     }
     
-    /// 从远程同步文章分类信息到本地
-    /// - Parameters:
-    ///   - userId: 用户ID
-    ///   - token: 用户令牌
-    ///   - completion: 完成回调
-    private func syncRemoteArticleCategoriesToLocal(userId: Int, token: String, completion: @escaping () -> Void) {
-        // 获取远程保存的文章分类数据
-        NetworkManager.shared.getUserData(userId: userId, token: token, dataKey: "article_categories")
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completionStatus in
-                    if case .failure(let error) = completionStatus {
-                        print("从远程获取文章分类失败: \(error)")
-                        completion()
-                    }
-                },
-                receiveValue: { [weak self] responseData in
-                    // 检查是否获取到数据
-                    if let categoriesData = responseData["article_categories"]?.data(using: .utf8) {
-                        do {
-                            // 尝试解析JSON数据
-                            if let categoriesArray = try JSONSerialization.jsonObject(with: categoriesData, options: []) as? [[String: Any]] {
-                                self?.processRemoteCategories(categoriesArray)
-                                print("成功同步文章分类从远程到本地")
-                            }
-                        } catch {
-                            print("解析远程文章分类数据失败: \(error)")
-                            
-                            // 检查是否需要处理分块数据
-                            if let metadataString = responseData["article_categories_metadata"],
-                               let metadataData = metadataString.data(using: .utf8),
-                               let metadata = try? JSONSerialization.jsonObject(with: metadataData, options: []) as? [String: Any],
-                               let totalChunks = metadata["totalChunks"] as? Int {
-                                
-                                print("检测到分块数据，尝试合并\(totalChunks)个块")
-                                self?.mergeRemoteCategoryChunks(userId: userId, token: token, totalChunks: totalChunks, completion: completion)
-                                return
-                            }
-                        }
-                    } else {
-                        print("远程没有文章分类数据")
-                    }
-                    completion()
-                }
-            )
-            .store(in: &cancellables)
-    }
-    
-    /// 处理从远程获取的文章分类数据
-    /// - Parameter categoriesArray: 分类数据数组
-    private func processRemoteCategories(_ categoriesArray: [[String: Any]]) {
-        // 这里需要根据实际的分类数据结构进行处理
-        // 假设分类数据是以特定格式存储的，需要进行转换和合并
-        
-        // 获取当前本地分类数据
-        if let localCategoriesData = UserDefaults.standard.data(forKey: "savedArticleLists") {
-            do {
-                if let localCategories = try JSONSerialization.jsonObject(with: localCategoriesData, options: []) as? [[String: Any]] {
-                    // 合并本地和远程分类
-                    let mergedCategories = mergeCategories(local: localCategories, remote: categoriesArray)
-                    
-                    // 将合并后的分类数据保存到本地
-                    if let mergedData = try? JSONSerialization.data(withJSONObject: mergedCategories, options: []) {
-                        UserDefaults.standard.set(mergedData, forKey: "savedArticleLists")
-                        print("已合并本地和远程文章分类数据")
-                    }
-                }
-            } catch {
-                print("处理本地分类数据失败: \(error)")
-                
-                // 如果无法处理本地数据，直接使用远程数据
-                if let remoteData = try? JSONSerialization.data(withJSONObject: categoriesArray, options: []) {
-                    UserDefaults.standard.set(remoteData, forKey: "savedArticleLists")
-                    print("使用远程文章分类数据替换本地数据")
-                }
-            }
-        } else {
-            // 如果没有本地数据，直接使用远程数据
-            if let remoteData = try? JSONSerialization.data(withJSONObject: categoriesArray, options: []) {
-                UserDefaults.standard.set(remoteData, forKey: "savedArticleLists")
-                print("使用远程文章分类数据（本地无数据）")
-            }
-        }
-    }
-    
-    /// 合并本地和远程分类数据
-    /// - Parameters:
-    ///   - local: 本地分类数据
-    ///   - remote: 远程分类数据
-    /// - Returns: 合并后的分类数据
-    private func mergeCategories(local: [[String: Any]], remote: [[String: Any]]) -> [[String: Any]] {
-        var categoriesMap = [String: [String: Any]]()
-        
-        // 先添加所有本地分类
-        for category in local {
-            if let id = category["id"] as? String {
-                categoriesMap[id] = category
-            }
-        }
-        
-        // 然后更新或添加远程分类
-        for remoteCategory in remote {
-            if let id = remoteCategory["id"] as? String {
-                // 如果本地已有此分类，保留本地的某些信息
-                if let localCategory = categoriesMap[id] {
-                    var mergedCategory = remoteCategory
-                    
-                    // 这里可以添加特定字段的保留逻辑，比如合并文章ID列表
-                    if let localArticleIds = localCategory["articleIds"] as? [String],
-                       let remoteArticleIds = remoteCategory["articleIds"] as? [String] {
-                        // 合并文章ID列表（去重）
-                        let combinedIds = Array(Set(localArticleIds + remoteArticleIds))
-                        mergedCategory["articleIds"] = combinedIds
-                    }
-                    
-                    categoriesMap[id] = mergedCategory
-                } else {
-                    // 本地没有，直接添加远程分类
-                    categoriesMap[id] = remoteCategory
-                }
-            }
-        }
-        
-        // 转换回数组
-        return Array(categoriesMap.values)
-    }
-    
-    /// 合并远程分类分块数据
-    /// - Parameters:
-    ///   - userId: 用户ID
-    ///   - token: 用户令牌
-    ///   - totalChunks: 总块数
-    ///   - completion: 完成回调
-    private func mergeRemoteCategoryChunks(userId: Int, token: String, totalChunks: Int, completion: @escaping () -> Void) {
-        var chunks: [String] = Array(repeating: "", count: totalChunks)
-        
-        // 创建一个DispatchGroup来追踪所有块的获取
-        let chunkGroup = DispatchGroup()
-        
-        // 获取每个数据块
-        for i in 0..<totalChunks {
-            let chunkKey = "article_categories_chunk_\(i)"
-            chunkGroup.enter()
-            
-            NetworkManager.shared.getUserData(userId: userId, token: token, dataKey: chunkKey)
-                .receive(on: DispatchQueue.main)
-                .sink(
-                    receiveCompletion: { completionStatus in
-                        if case .failure(let error) = completionStatus {
-                            print("获取分类数据块\(i)失败: \(error)")
-                        }
-                        chunkGroup.leave()
-                    },
-                    receiveValue: { responseData in
-                        if let chunkData = responseData[chunkKey] {
-                            chunks[i] = chunkData
-                            print("已获取分类数据块\(i+1)/\(totalChunks)")
-                        }
-                    }
-                )
-                .store(in: &cancellables)
-        }
-        
-        // 当所有块都获取完成后，尝试合并并解析
-        chunkGroup.notify(queue: .main) { [weak self] in
-            // 合并所有数据块
-            let combinedData = chunks.joined()
-            
-            if let jsonData = combinedData.data(using: .utf8) {
-                do {
-                    // 尝试解析JSON数据
-                    if let categoriesArray = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: Any]] {
-                        self?.processRemoteCategories(categoriesArray)
-                        print("成功合并并同步分类数据从远程到本地")
-                    }
-                } catch {
-                    print("解析合并的远程分类数据失败: \(error)")
-                }
-            }
-            
-            completion()
-        }
-    }
-    
     // MARK: - 辅助方法
     
     /// 检查用户是否已登录
@@ -1430,5 +1267,20 @@ class UserManager: ObservableObject {
     func validateVerificationCode(email: String, verificationCode: String) -> Bool {
         // 此方法仅用于本地模拟验证，实际应用中应通过服务器验证
         return verificationCode == "1234" // 测试用，实际逻辑应由服务器验证
+    }
+    
+    // MARK: - 用户数据管理方法
+    
+    /// 更新用户信息
+    /// - Parameter user: 更新后的用户
+    func updateUser(_ user: User) {
+        self.currentUser = user
+        saveUserToStorage(user: user)
+        
+        // 如果用户已登录，并且有令牌，则同步到服务器
+        if isLoggedIn, let token = user.token, !token.isEmpty, user.id > 0 {
+            // 在实际应用中，这里应该将用户信息同步到服务器
+            print("更新用户信息并同步到服务器: \(user.username)")
+        }
     }
 } 

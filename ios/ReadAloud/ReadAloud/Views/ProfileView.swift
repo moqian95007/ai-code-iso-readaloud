@@ -6,6 +6,9 @@ struct ProfileView: View {
     
     // 状态变量
     @State private var isShowingLogin: Bool = false
+    @State private var isShowingSubscription: Bool = false
+    @State private var refreshView: Bool = false  // 添加刷新触发器
+    @State private var showLoginAlert: Bool = false // 添加登录提示弹窗状态
     
     var body: some View {
         NavigationView {
@@ -35,6 +38,22 @@ struct ProfileView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.gray)
                         }
+                        
+                        // 显示会员状态
+                        if user.hasActiveSubscription {
+                            HStack {
+                                Image(systemName: "crown.fill")
+                                    .foregroundColor(.yellow)
+                                Text("PRO会员")
+                                    .foregroundColor(.orange)
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 12)
+                            .background(Color(UIColor.systemGray6))
+                            .cornerRadius(15)
+                            .padding(.top, 5)
+                        }
                     }
                     .padding(.bottom, 10)
                 } else {
@@ -58,6 +77,38 @@ struct ProfileView: View {
                 
                 // 设置项目列表
                 List {
+                    // 会员订阅项 - 不论是否登录都显示
+                    Button(action: {
+                        if userManager.isLoggedIn {
+                            isShowingSubscription = true
+                        } else {
+                            // 显示登录提示
+                            showLoginAlert = true
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(.yellow)
+                                .frame(width: 30)
+                            
+                            Text("会员订阅")
+                                .padding(.leading, 5)
+                            
+                            Spacer()
+                            
+                            if let user = userManager.currentUser, user.hasActiveSubscription {
+                                Text("PRO会员")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.orange)
+                            }
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
                     if userManager.isLoggedIn {
                         settingRow(icon: "person.crop.circle", title: "个人信息")
                     }
@@ -94,9 +145,41 @@ struct ProfileView: View {
                 Spacer()
             }
             .navigationBarTitle("我的", displayMode: .inline)
+            .onAppear {
+                // 添加订阅状态更新通知观察者
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("SubscriptionStatusUpdated"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    print("ProfileView: 收到订阅状态更新通知")
+                    self.refreshView.toggle() // 触发界面刷新
+                }
+            }
+            .onDisappear {
+                // 移除通知观察者
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSNotification.Name("SubscriptionStatusUpdated"),
+                    object: nil
+                )
+            }
+            .id(refreshView) // 使用id强制视图在refreshView变化时重新构建
+            // 添加登录提示弹窗
+            .alert("需要登录", isPresented: $showLoginAlert) {
+                Button("登录", role: .none) {
+                    isShowingLogin = true
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("请先登录以访问会员订阅功能")
+            }
         }
         .sheet(isPresented: $isShowingLogin) {
             LoginView(isPresented: $isShowingLogin)
+        }
+        .sheet(isPresented: $isShowingSubscription) {
+            SubscriptionView(isPresented: $isShowingSubscription)
         }
     }
     

@@ -451,6 +451,16 @@ class NetworkManager {
             .eraseToAnyPublisher()
     }
     
+    /// 执行网络请求并直接返回Data
+    /// - Parameters:
+    ///   - endpoint: API端点
+    ///   - method: HTTP方法
+    ///   - parameters: 请求参数
+    /// - Returns: 包含原始Data的Publisher
+    func performRequest(endpoint: String, method: String, parameters: [String: Any]? = nil) -> AnyPublisher<Data, NetworkError> {
+        return request(endpoint: endpoint, method: method, parameters: parameters)
+    }
+    
     // MARK: - 私有辅助方法
     
     /// 通用网络请求方法

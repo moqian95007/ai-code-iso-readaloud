@@ -1,0 +1,154 @@
+{
+  "identifier" : "8D20ACAB",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "com.readaloud.app",
+    "_developerTeamID" : "YOUR_TEAM_ID",
+    "_lastSynchronizedDate" : 689249087.10398602
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "20A49561",
+      "localizations" : [
+        {
+          "description" : "解锁全部高级功能，畅享语音朗读",
+          "displayName" : "PRO会员",
+          "locale" : "zh_CN"
+        },
+        {
+          "description" : "Unlock all premium features and enjoy voice reading",
+          "displayName" : "PRO Membership",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "ReadAloud Memberships",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "18.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "7465F775",
+          "localizations" : [
+            {
+              "description" : "一个月内畅享所有高级功能",
+              "displayName" : "月度会员",
+              "locale" : "zh_CN"
+            },
+            {
+              "description" : "Enjoy all premium features for one month",
+              "displayName" : "Monthly Membership",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "top.ai-toolkit.readaloud.subscription.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Membership",
+          "subscriptionGroupID" : "20A49561",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "48.00",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "2A3B9F84",
+          "localizations" : [
+            {
+              "description" : "三个月内畅享所有高级功能，每月仅需16元",
+              "displayName" : "季度会员",
+              "locale" : "zh_CN"
+            },
+            {
+              "description" : "Enjoy all premium features for three months",
+              "displayName" : "Quarterly Membership",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "top.ai-toolkit.readaloud.subscription.quarterly",
+          "recurringSubscriptionPeriod" : "P3M",
+          "referenceName" : "Quarterly Membership",
+          "subscriptionGroupID" : "20A49561",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "88.00",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "3B4CD095",
+          "localizations" : [
+            {
+              "description" : "六个月内畅享所有高级功能，每月仅需15元",
+              "displayName" : "半年会员",
+              "locale" : "zh_CN"
+            },
+            {
+              "description" : "Enjoy all premium features for six months",
+              "displayName" : "Half-Yearly Membership",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "top.ai-toolkit.readaloud.subscription.halfYearly",
+          "recurringSubscriptionPeriod" : "P6M",
+          "referenceName" : "Half-Yearly Membership",
+          "subscriptionGroupID" : "20A49561",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "158.00",
+          "familyShareable" : false,
+          "groupNumber" : 4,
+          "internalID" : "4C5DE1A6",
+          "localizations" : [
+            {
+              "description" : "一年内畅享所有高级功能，每月仅需13元",
+              "displayName" : "年度会员",
+              "locale" : "zh_CN"
+            },
+            {
+              "description" : "Enjoy all premium features for one year",
+              "displayName" : "Yearly Membership",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "top.ai-toolkit.readaloud.subscription.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Yearly Membership",
+          "subscriptionGroupID" : "20A49561",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+} 

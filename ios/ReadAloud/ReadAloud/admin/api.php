@@ -133,6 +133,7 @@ if (!isLoggedIn()) {
             <ul>
                 <li><a href="dashboard.php">仪表盘</a></li>
                 <li><a href="users.php">用户管理</a></li>
+                <li><a href="subscriptions.php">订阅管理</a></li>
                 <li><a href="user_data.php">用户数据</a></li>
                 <li><a href="api.php">API接口</a></li>
             </ul>

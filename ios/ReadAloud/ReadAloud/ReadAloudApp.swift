@@ -8,6 +8,7 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import StoreKit
 
 // 确保引入了 PlaybackContentType 和 PlaybackManager
 // 这两个类型在 ArticleHighlightedText.swift 中定义
@@ -35,6 +36,16 @@ struct ReadAloudApp: App {
     // 初始化，设置后台音频播放
     init() {
         setupBackgroundAudio()
+        
+        // 初始化StoreKit配置
+        _ = StoreKitConfiguration.shared
+        StoreKitConfiguration.shared.enableStoreKitTestObserver()
+        
+        // 初始化订阅检查器
+        _ = SubscriptionChecker.shared
+        
+        // 初始化订阅服务
+        _ = SubscriptionService.shared
     }
     
     // 设置后台音频会话

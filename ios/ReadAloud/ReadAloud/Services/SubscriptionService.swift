@@ -1,0 +1,194 @@
+import Foundation
+import Combine
+import StoreKit
+import UIKit
+import SwiftUI
+
+/// 订阅服务，作为业务逻辑与StoreKit之间的中间层
+class SubscriptionService: ObservableObject {
+    // 单例模式
+    static let shared = SubscriptionService()
+    
+    // 订阅管理器
+    private let subscriptionManager = SubscriptionManager.shared
+    
+    // 用户管理器
+    private let userManager = UserManager.shared
+    
+    // 订阅仓库
+    private let subscriptionRepository = SubscriptionRepository.shared
+    
+    // 订阅检查器
+    private let subscriptionChecker = SubscriptionChecker.shared
+    
+    // 发布订阅状态
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String? = nil
+    @Published var products: [SubscriptionProduct] = []
+    @Published var selectedProductId: String? = nil
+    
+    // 取消标记
+    private var cancellables = Set<AnyCancellable>()
+    
+    // 私有初始化方法
+    private init() {
+        // 订阅订阅管理器状态变化
+        subscriptionManager.$isLoading
+            .assign(to: \.isLoading, on: self)
+            .store(in: &cancellables)
+        
+        subscriptionManager.$errorMessage
+            .assign(to: \.errorMessage, on: self)
+            .store(in: &cancellables)
+        
+        subscriptionManager.$availableProducts
+            .assign(to: \.products, on: self)
+            .store(in: &cancellables)
+    }
+    
+    /// 加载订阅产品
+    func loadProducts() {
+        subscriptionManager.loadProducts()
+    }
+    
+    /// 购买订阅
+    /// - Parameters:
+    ///   - productId: 产品ID
+    ///   - completion: 完成回调
+    func purchaseSubscription(productId: String, completion: @escaping (Result<SubscriptionType, Error>) -> Void) {
+        // 确保用户已登录
+        guard userManager.isLoggedIn, let user = userManager.currentUser else {
+            completion(.failure(NSError(domain: "SubscriptionService", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先登录再订阅会员"])))
+            return
+        }
+        
+        // 使用订阅管理器购买
+        subscriptionManager.purchaseSubscription(productId: productId) { [weak self] result in
+            switch result {
+            case .success(let subscriptionType):
+                // 创建新的订阅记录
+                self?.createSubscriptionRecord(for: user.id, type: subscriptionType, productId: productId)
+                completion(.success(subscriptionType))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    /// 恢复购买
+    /// - Parameter completion: 完成回调
+    func restorePurchases(completion: @escaping (Result<SubscriptionType?, Error>) -> Void) {
+        // 确保用户已登录
+        guard userManager.isLoggedIn, let user = userManager.currentUser else {
+            completion(.failure(NSError(domain: "SubscriptionService", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先登录再恢复购买"])))
+            return
+        }
+        
+        // 使用订阅管理器恢复购买
+        subscriptionManager.restorePurchases { [weak self] result in
+            switch result {
+            case .success(let subscriptionType):
+                if let type = subscriptionType, type != .none {
+                    // 创建恢复的订阅记录
+                    self?.createSubscriptionRecord(for: user.id, type: type, productId: "restored_\(type.rawValue)")
+                    
+                    // 发送订阅状态更新通知
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                    }
+                }
+                completion(.success(subscriptionType))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    /// 创建订阅记录
+    /// - Parameters:
+    ///   - userId: 用户ID
+    ///   - type: 订阅类型
+    ///   - productId: 产品ID
+    private func createSubscriptionRecord(for userId: Int, type: SubscriptionType, productId: String) {
+        let startDate = Date()
+        var endDate: Date
+        
+        // 计算订阅结束日期
+        switch type {
+        case .monthly:
+            endDate = Calendar.current.date(byAdding: .month, value: 1, to: startDate)!
+        case .quarterly:
+            endDate = Calendar.current.date(byAdding: .month, value: 3, to: startDate)!
+        case .halfYearly:
+            endDate = Calendar.current.date(byAdding: .month, value: 6, to: startDate)!
+        case .yearly:
+            endDate = Calendar.current.date(byAdding: .year, value: 1, to: startDate)!
+        default:
+            // 对于无效的订阅类型，不创建记录
+            return
+        }
+        
+        // 创建订阅记录
+        let subscription = Subscription(
+            userId: userId,
+            type: type,
+            startDate: startDate,
+            endDate: endDate,
+            subscriptionId: "\(productId)_\(UUID().uuidString)"
+        )
+        
+        // 添加到订阅仓库
+        subscriptionRepository.addSubscription(subscription)
+    }
+    
+    /// 检查功能是否可用，并在需要时显示升级提示
+    /// - Parameters:
+    ///   - feature: 功能类型
+    ///   - viewController: 视图控制器
+    ///   - completion: 完成回调，传入是否有权限
+    func checkFeatureAvailability(feature: FeatureType, viewController: UIViewController? = nil, completion: ((Bool) -> Void)? = nil) {
+        let hasAccess = subscriptionChecker.canAccess(feature)
+        
+        if !hasAccess && viewController != nil {
+            subscriptionChecker.showPremiumFeatureAlert(for: feature, presentingViewController: viewController!) {
+                completion?(false)
+            }
+        } else {
+            completion?(hasAccess)
+        }
+        
+        return
+    }
+    
+    /// 检查文章数量限制
+    /// - Parameters:
+    ///   - currentCount: 当前文章数量
+    ///   - viewController: 视图控制器
+    ///   - completion: 完成回调，传入是否超出限制
+    func checkArticleLimit(currentCount: Int, viewController: UIViewController? = nil, completion: ((Bool) -> Void)? = nil) {
+        let withinLimit = subscriptionChecker.checkArticleLimit(currentCount: currentCount)
+        
+        if !withinLimit && viewController != nil {
+            // 显示文章数量限制提示
+            let alert = UIAlertController(
+                title: "文章数量已达上限",
+                message: "免费用户最多可添加20篇文章，升级到会员可无限添加文章。",
+                preferredStyle: .alert
+            )
+            
+            alert.addAction(UIAlertAction(title: "订阅会员", style: .default) { _ in
+                // 跳转到订阅页面
+                let subscriptionVC = UIHostingController(rootView: SubscriptionView(isPresented: .constant(true)))
+                viewController!.present(subscriptionVC, animated: true, completion: nil)
+            })
+            
+            alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in
+                completion?(false)
+            })
+            
+            viewController!.present(alert, animated: true, completion: nil)
+        } else {
+            completion?(withinLimit)
+        }
+    }
+} 

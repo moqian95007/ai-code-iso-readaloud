@@ -84,6 +84,11 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<key>StoreKit</key>
+	<dict>
+		<key>Configuration</key>
+		<string>StoreKitProducts</string>
+	</dict>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
