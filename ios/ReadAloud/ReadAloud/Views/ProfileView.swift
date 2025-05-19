@@ -7,6 +7,7 @@ struct ProfileView: View {
     // 状态变量
     @State private var isShowingLogin: Bool = false
     @State private var isShowingSubscription: Bool = false
+    @State private var isShowingImportPurchase: Bool = false // 添加导入次数购买状态
     @State private var refreshView: Bool = false  // 添加刷新触发器
     @State private var showLoginAlert: Bool = false // 添加登录提示弹窗状态
     
@@ -121,6 +122,38 @@ struct ProfileView: View {
                         .padding(.vertical, 8)
                     }
                     
+                    // 购买导入次数项
+                    Button(action: {
+                        if userManager.isLoggedIn {
+                            isShowingImportPurchase = true
+                        } else {
+                            // 显示登录提示
+                            showLoginAlert = true
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "doc.fill.badge.plus")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            
+                            Text("购买导入次数")
+                                .padding(.leading, 5)
+                            
+                            Spacer()
+                            
+                            if let user = userManager.currentUser {
+                                Text("\(user.remainingImportCount)次")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                            }
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
                     if userManager.isLoggedIn {
                         settingRow(icon: "person.crop.circle", title: "个人信息")
                     }
@@ -184,7 +217,7 @@ struct ProfileView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("请先登录以访问会员订阅功能")
+                Text("请先登录以访问此功能")
             }
         }
         .sheet(isPresented: $isShowingLogin) {
@@ -192,6 +225,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $isShowingSubscription) {
             SubscriptionView(isPresented: $isShowingSubscription)
+        }
+        .sheet(isPresented: $isShowingImportPurchase) {
+            ImportPurchaseView(isPresented: $isShowingImportPurchase)
         }
     }
     

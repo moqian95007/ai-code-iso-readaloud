@@ -4,7 +4,86 @@
 
   ],
   "products" : [
-
+    {
+      "displayPrice" : "2.00",
+      "familyShareable" : false,
+      "internalID" : "1A2B3C4D",
+      "localizations" : [
+        {
+          "description" : "购买1次导入机会",
+          "displayName" : "导入1次",
+          "locale" : "zh_CN"
+        },
+        {
+          "description" : "Purchase 1 import chance",
+          "displayName" : "Import 1 Time",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "top.ai-toolkit.readaloud.import.single",
+      "referenceName" : "Import 1 Time",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "5.00",
+      "familyShareable" : false,
+      "internalID" : "2B3C4D5E",
+      "localizations" : [
+        {
+          "description" : "购买3次导入机会",
+          "displayName" : "导入3次",
+          "locale" : "zh_CN"
+        },
+        {
+          "description" : "Purchase 3 import chances",
+          "displayName" : "Import 3 Times",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "top.ai-toolkit.readaloud.import.three",
+      "referenceName" : "Import 3 Times",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "8.00",
+      "familyShareable" : false,
+      "internalID" : "3C4D5E6F",
+      "localizations" : [
+        {
+          "description" : "购买5次导入机会",
+          "displayName" : "导入5次",
+          "locale" : "zh_CN"
+        },
+        {
+          "description" : "Purchase 5 import chances",
+          "displayName" : "Import 5 Times",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "top.ai-toolkit.readaloud.import.five",
+      "referenceName" : "Import 5 Times",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "15.00",
+      "familyShareable" : false,
+      "internalID" : "4D5E6F7G",
+      "localizations" : [
+        {
+          "description" : "购买10次导入机会",
+          "displayName" : "导入10次",
+          "locale" : "zh_CN"
+        },
+        {
+          "description" : "Purchase 10 import chances",
+          "displayName" : "Import 10 Times",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "top.ai-toolkit.readaloud.import.ten",
+      "referenceName" : "Import 10 Times",
+      "type" : "Consumable"
+    }
   ],
   "settings" : {
     "_applicationInternalID" : "com.readaloud.app",

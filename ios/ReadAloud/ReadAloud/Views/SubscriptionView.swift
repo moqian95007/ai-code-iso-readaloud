@@ -503,110 +503,27 @@ struct SubscriptionView: View {
         errorMessage = nil
         showError = false
         
-        // 检查是否使用StoreKit 2.0 API
-        if #available(iOS 15.0, *), StoreKitConfiguration.shared.isTestEnvironment {
-            print("使用StoreKit 2.0恢复购买")
-            Task {
-                do {
-                    var hasRestoredSubscription = false
-                    
-                    // 使用StoreKit 2.0 API恢复购买
-                    for await verification in StoreKit.Transaction.all {
-                        do {
-                            // 验证交易
-                            let transaction = try verification.payloadValue
-                            print("恢复购买成功: \(transaction.productID)")
-                            hasRestoredSubscription = true
-                            
-                            // 获取当前用户
-                            if let user = userManager.currentUser, user.id > 0 {
-                                // 获取订阅类型
-                                var subscriptionType: SubscriptionType = .none
-                                switch transaction.productID {
-                                case "top.ai-toolkit.readaloud.subscription.monthly":
-                                    subscriptionType = .monthly
-                                case "top.ai-toolkit.readaloud.subscription.quarterly":
-                                    subscriptionType = .quarterly
-                                case "top.ai-toolkit.readaloud.subscription.halfYearly":
-                                    subscriptionType = .halfYearly
-                                case "top.ai-toolkit.readaloud.subscription.yearly":
-                                    subscriptionType = .yearly
-                                default:
-                                    subscriptionType = .none
-                                }
-                                
-                                // 计算订阅有效期
-                                let startDate = Date()
-                                var endDate: Date
-                                
-                                switch subscriptionType {
-                                case .monthly:
-                                    endDate = Calendar.current.date(byAdding: .month, value: 1, to: startDate)!
-                                case .quarterly:
-                                    endDate = Calendar.current.date(byAdding: .month, value: 3, to: startDate)!
-                                case .halfYearly:
-                                    endDate = Calendar.current.date(byAdding: .month, value: 6, to: startDate)!
-                                case .yearly:
-                                    endDate = Calendar.current.date(byAdding: .year, value: 1, to: startDate)!
-                                case .none:
-                                    continue
-                                }
-                                
-                                // 创建新的订阅
-                                let subscription = Subscription(
-                                    userId: user.id,
-                                    type: subscriptionType,
-                                    startDate: startDate,
-                                    endDate: endDate,
-                                    subscriptionId: "\(transaction.productID)_\(UUID().uuidString)"
-                                )
-                                
-                                // 添加订阅记录
-                                SubscriptionRepository.shared.addSubscription(subscription)
-                                
-                                // 发送通知，通知UI更新
-                                DispatchQueue.main.async {
-                                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                                }
-                            }
-                        } catch {
-                            print("恢复购买验证失败: \(error.localizedDescription)")
-                        }
-                    }
-                    
-                    // 如果没有恢复任何订阅，显示错误信息
-                    DispatchQueue.main.async {
-                        self.isRestoring = false
-                        if !hasRestoredSubscription {
-                            self.errorMessage = "未找到可恢复的购买"
-                            self.showError = true
-                        }
-                    }
-                }
-            }
-        } else {
-            // 使用传统的StoreKit API恢复购买
-            print("使用传统StoreKit API恢复购买")
-            subscriptionService.restorePurchases { result in
-                DispatchQueue.main.async {
-                    self.isRestoring = false
-                    
-                    switch result {
-                    case .success(let type):
-                        if type == nil || type == .none {
-                            self.errorMessage = "未找到可恢复的购买"
-                            self.showError = true
-                        } else {
-                            // 恢复成功，等待1秒后关闭订阅页面
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                                self.isPresented.wrappedValue = false
-                            }
-                        }
-                    case .failure(let error):
-                        // 显示错误
-                        self.errorMessage = error.localizedDescription
+        // 使用传统的StoreKit API恢复购买，避免重复创建订阅
+        print("使用订阅服务恢复购买")
+        subscriptionService.restorePurchases { result in
+            DispatchQueue.main.async {
+                self.isRestoring = false
+                
+                switch result {
+                case .success(let type):
+                    if type == nil || type == .none {
+                        self.errorMessage = "未找到可恢复的购买"
                         self.showError = true
+                    } else {
+                        // 恢复成功，等待1秒后关闭订阅页面
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            self.isPresented.wrappedValue = false
+                        }
                     }
+                case .failure(let error):
+                    // 显示错误
+                    self.errorMessage = error.localizedDescription
+                    self.showError = true
                 }
             }
         }

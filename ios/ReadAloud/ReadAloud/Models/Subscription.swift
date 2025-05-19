@@ -23,6 +23,7 @@ struct Subscription: Codable, Identifiable {
     
     /// 订阅是否有效
     var isValid: Bool {
+        // 必须同时满足：是活跃的(isActive为true)且未过期
         return isActive && endDate > Date()
     }
     

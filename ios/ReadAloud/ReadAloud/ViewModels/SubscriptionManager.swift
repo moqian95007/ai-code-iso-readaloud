@@ -73,6 +73,13 @@ class SubscriptionManager: NSObject, ObservableObject {
         return false
     }
     
+    // 添加最近处理的交易记录跟踪
+    private var recentlyProcessedTransactions = Set<String>()
+    private let maxRecentTransactions = 10
+    
+    // 添加交易ID跟踪集合
+    private var processedTransactionIds = Set<String>()
+    
     // 初始化
     private override init() {
         super.init()
@@ -157,6 +164,9 @@ class SubscriptionManager: NSObject, ObservableObject {
     private func restorePurchasesWithStoreKit2(completion: @escaping (Result<SubscriptionType?, Error>) -> Void) {
         print("========== StoreKit 2.0 恢复购买开始 ==========")
         
+        // 标记是否已经处理了活跃订阅
+        var hasProcessedActiveSubscription = false
+        
         // 创建异步任务获取交易
         Task {
             do {
@@ -234,9 +244,27 @@ class SubscriptionManager: NSObject, ObservableObject {
                                     subscriptionId: "sk2_restored_\(transaction.id)_\(transaction.productID)"
                                 )
                                 
-                                // 添加到订阅仓库
+                                // 添加到订阅仓库 - 这里有同步机制，会自动触发同步到服务器
                                 SubscriptionRepository.shared.addSubscription(subscription)
                                 print("已添加恢复的订阅记录到仓库")
+                                
+                                // 标记已处理
+                                hasProcessedActiveSubscription = true
+                                
+                                // 找到有效订阅后立即完成流程
+                                print("找到有效订阅，准备返回结果")
+                                DispatchQueue.main.async {
+                                    print("返回恢复购买结果: 类型=\(subscriptionType.rawValue)")
+                                    // 不在这里发送通知，留给SubscriptionService统一处理
+                                    // NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                                    completion(.success(subscriptionType))
+                                    self.purchaseCompletionHandler?(.success(subscriptionType))
+                                    self.purchaseCompletionHandler = nil
+                                    print("========== StoreKit 2.0 恢复购买结束 ==========")
+                                }
+                                
+                                // 找到活跃订阅并处理后不再继续检查其他交易
+                                break
                             } else {
                                 print("用户未登录，无法创建订阅记录")
                             }
@@ -249,6 +277,12 @@ class SubscriptionManager: NSObject, ObservableObject {
                 }
                 
                 print("交易历史查询完成")
+                
+                // 如果已经处理了活跃订阅，不再执行后续逻辑
+                if hasProcessedActiveSubscription {
+                    print("已在处理过程中完成了恢复购买流程")
+                    return
+                }
                 
                 if !transactionFound {
                     print("⚠️ 警告：没有找到任何交易记录")
@@ -267,7 +301,8 @@ class SubscriptionManager: NSObject, ObservableObject {
                     
                     // 发送订阅状态更新通知
                     DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                        // 不在这里发送通知，留给SubscriptionService统一处理
+                        // NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
                         completion(.success(latestSubscriptionType))
                         self.purchaseCompletionHandler?(.success(latestSubscriptionType))
                         self.purchaseCompletionHandler = nil
@@ -322,6 +357,23 @@ class SubscriptionManager: NSObject, ObservableObject {
         print("原始购买日期: \(originalPurchaseDate?.description ?? "未提供，使用当前日期")")
         print("收据数据大小: \(receiptData.count) 字节")
         
+        // 生成交易唯一标识符（使用产品ID和当前时间）
+        let transactionKey = "\(productId)_\(Date().timeIntervalSince1970)"
+        
+        // 检查是否是重复处理的交易
+        if recentlyProcessedTransactions.contains(transactionKey) {
+            print("跳过重复处理的交易: \(transactionKey)")
+            return
+        }
+        
+        // 添加到最近处理的交易
+        recentlyProcessedTransactions.insert(transactionKey)
+        
+        // 如果超过最大记录数，移除最早的记录
+        if recentlyProcessedTransactions.count > maxRecentTransactions {
+            recentlyProcessedTransactions.removeFirst()
+        }
+        
         // 将收据转换为Base64字符串前50个字符
         let base64Receipt = receiptData.base64EncodedString()
         print("收据Base64前缀: \(String(base64Receipt.prefix(50)))...")
@@ -329,8 +381,23 @@ class SubscriptionManager: NSObject, ObservableObject {
         // 在实际应用中，这里应该将收据发送到服务器进行验证
         // 简化版本中，我们仅根据产品ID直接更新用户订阅状态
         
-        let subscriptionType = subscriptionTypeForProductId(productId)
+        var subscriptionType = subscriptionTypeForProductId(productId)
         print("订阅类型: \(subscriptionType)")
+        
+        // 检查订阅类型，如果是none，需要根据productId转换为正确的类型
+        if subscriptionType == .none && productId.contains(".subscription.") {
+            // 从产品ID中提取订阅类型
+            if productId.contains(".monthly") {
+                subscriptionType = .monthly
+            } else if productId.contains(".quarterly") {
+                subscriptionType = .quarterly
+            } else if productId.contains(".halfYearly") {
+                subscriptionType = .halfYearly
+            } else if productId.contains(".yearly") {
+                subscriptionType = .yearly
+            }
+            print("订阅类型更正为: \(subscriptionType)")
+        }
         
         // 使用原始购买日期（如果提供）或当前日期
         let startDate = originalPurchaseDate ?? Date()
@@ -374,9 +441,15 @@ class SubscriptionManager: NSObject, ObservableObject {
                 subscriptionId: "\(productId)_\(UUID().uuidString)"
             )
             
-            // 添加到订阅仓库
+            // 添加到订阅仓库 - 注意：SubscriptionRepository.addSubscription会自动同步到服务器
+            // 因此不需要在这里发送通知或进行其他操作
             SubscriptionRepository.shared.addSubscription(subscription)
             print("成功添加订阅记录: \(subscription.subscriptionId)")
+            
+            // 发送通知更新UI
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            }
             
             // 完成回调
             purchaseCompletionHandler?(.success(subscriptionType))
@@ -491,6 +564,32 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
     }
     
     private func handlePurchasedTransaction(_ transaction: SKPaymentTransaction) {
+        // 检查交易ID是否已处理过，避免重复处理
+        if transaction.transactionIdentifier == nil {
+            // 没有交易ID，仍然处理该交易
+            print("警告：交易没有ID，仍将处理")
+        }
+        
+        if let id = transaction.transactionIdentifier, processedTransactionIds.contains(id) {
+            print("交易 \(id) 已处理过，跳过")
+            SKPaymentQueue.default().finishTransaction(transaction)
+            return
+        }
+        
+        // 记录交易ID
+        if let id = transaction.transactionIdentifier {
+            processedTransactionIds.insert(id)
+            print("记录交易ID: \(id)，目前已处理 \(processedTransactionIds.count) 个交易")
+        }
+        
+        // 忽略消费型产品的交易 - 由ImportPurchaseService处理
+        let productId = transaction.payment.productIdentifier
+        if productId.contains("import.") {
+            print("检测到消费型产品交易: \(productId)，由ImportPurchaseService处理")
+            SKPaymentQueue.default().finishTransaction(transaction)
+            return
+        }
+        
         // 获取收据数据
         guard let receiptURL = Bundle.main.appStoreReceiptURL,
               let receiptData = try? Data(contentsOf: receiptURL) else {
@@ -510,6 +609,15 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
     private func handleRestoredTransaction(_ transaction: SKPaymentTransaction) {
         // 详细打印恢复购买的交易信息
         print("========== 恢复购买详细信息 ==========")
+        
+        // 忽略消费型产品的交易 - 由ImportPurchaseService处理
+        let productId = transaction.payment.productIdentifier
+        if productId.contains("import.") {
+            print("检测到消费型产品恢复交易: \(productId)，由ImportPurchaseService处理")
+            SKPaymentQueue.default().finishTransaction(transaction)
+            return
+        }
+        
         print("交易ID: \(transaction.transactionIdentifier ?? "未知")")
         print("交易日期: \(transaction.transactionDate?.description ?? "未知")")
         print("产品ID: \(transaction.payment.productIdentifier)")

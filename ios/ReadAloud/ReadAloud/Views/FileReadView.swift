@@ -162,6 +162,13 @@ struct FileReadView: View {
                         // 导入成功，显示成功消息
                         showImportSuccess = true
                         
+                        // 不再尝试从远程获取最新导入次数，而是相信本地数据
+                        // 发送通知刷新UI显示
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                            print("文档导入成功后刷新UI显示")
+                        }
+                        
                         // 导入成功后强制重新加载文档库，确保排序生效
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             print("文档导入成功，强制重新加载文档库")
@@ -343,6 +350,8 @@ struct ImportButton: View {
     @State private var showSubscriptionAlert = false
     @State private var showLoginView = false  // 添加登录视图状态
     @State private var showSubscriptionView = false  // 添加订阅视图状态
+    @State private var showImportPurchaseView = false  // 添加导入次数购买状态
+    @State private var refreshTrigger = false  // 添加刷新触发器
     
     // 获取UserManager实例
     @ObservedObject private var userManager = UserManager.shared
@@ -405,13 +414,19 @@ struct ImportButton: View {
         } message: {
             Text("您需要登录后才能导入本地文档")
         }
-        .alert("导入次数已用完", isPresented: $showSubscriptionAlert) {
-            Button("取消", role: .cancel) {}
-            Button("订阅会员") {
-                showSubscriptionView = true  // 直接显示订阅视图
+        // 使用confirmationDialog替代alert，支持多个按钮
+        .confirmationDialog("导入次数已用完", isPresented: $showSubscriptionAlert, titleVisibility: .visible) {
+            Button("订阅会员", role: .none) {
+                showSubscriptionView = true  // 显示订阅视图
             }
+            
+            Button("购买导入次数", role: .none) {
+                showImportPurchaseView = true  // 显示导入次数购买视图
+            }
+            
+            Button("取消", role: .cancel) {}
         } message: {
-            Text("您的免费导入次数已用完，订阅会员后可无限导入本地文档")
+            Text("您的免费导入次数已用完，可以选择订阅会员获得无限导入特权，或购买单次导入次数。")
         }
         .sheet(isPresented: $showLoginView) {
             LoginView(isPresented: $showLoginView)
@@ -419,10 +434,34 @@ struct ImportButton: View {
         .sheet(isPresented: $showSubscriptionView) {
             SubscriptionView(isPresented: $showSubscriptionView)
         }
+        .sheet(isPresented: $showImportPurchaseView) {
+            ImportPurchaseView(isPresented: $showImportPurchaseView)
+        }
         .alert("格式不支持", isPresented: $showFormatError) {
             Button("确定", role: .cancel) { }
         } message: {
             Text("仅支持导入txt、pdf和epub格式的文档")
+        }
+        .id(refreshTrigger) // 使用刷新触发器强制重建视图
+        .onAppear {
+            // 添加通知监听，用于刷新UI
+            NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("SubscriptionStatusUpdated"),
+                object: nil,
+                queue: .main
+            ) { _ in
+                print("ImportButton收到订阅状态更新通知，刷新UI")
+                // 切换刷新触发器强制刷新视图
+                self.refreshTrigger.toggle()
+            }
+        }
+        .onDisappear {
+            // 移除通知监听
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSNotification.Name("SubscriptionStatusUpdated"),
+                object: nil
+            )
         }
     }
 }

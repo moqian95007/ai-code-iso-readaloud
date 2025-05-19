@@ -20,6 +20,15 @@ class SubscriptionRepository: ObservableObject {
     /// 取消标记
     private var cancellables = Set<AnyCancellable>()
     
+    // 添加防抖计时器
+    private var syncDebounceTimer: Timer?
+    private var lastAddedSubscriptionId: String?
+    private var lastSyncTime: Date = Date(timeIntervalSince1970: 0)
+    
+    // 添加同步锁定标志，防止短时间内重复请求
+    private var isSyncLocked: Bool = false
+    private var syncLockTimeout: Timer?
+    
     /// 私有初始化方法
     private init() {
         loadSubscriptionsFromStorage()
@@ -28,6 +37,19 @@ class SubscriptionRepository: ObservableObject {
     /// 添加订阅
     /// - Parameter subscription: 订阅信息
     func addSubscription(_ subscription: Subscription) {
+        // 防止短时间内重复添加相同订阅
+        let now = Date()
+        if let lastId = lastAddedSubscriptionId, 
+           lastId.contains(subscription.type.rawValue) && // 类型相同
+           now.timeIntervalSince(lastSyncTime) < 5 {  // 5秒内的重复添加
+            print("忽略短时间内(\(now.timeIntervalSince(lastSyncTime))秒)重复添加的订阅: \(subscription.subscriptionId)")
+            return
+        }
+        
+        // 记录本次添加
+        lastAddedSubscriptionId = subscription.subscriptionId
+        lastSyncTime = now
+        
         // 如果是新的活跃订阅，取消之前的活跃订阅
         if subscription.isActive {
             deactivateAllSubscriptions()
@@ -44,8 +66,13 @@ class SubscriptionRepository: ObservableObject {
         // 保存到本地
         saveSubscriptionsToStorage()
         
-        // 同步到远程
-        syncSubscriptionsToRemote()
+        // 取消之前的同步计时器
+        syncDebounceTimer?.invalidate()
+        
+        // 延迟3秒执行同步，允许在此期间合并多个更改
+        syncDebounceTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            self?.syncSubscriptionsToRemote()
+        }
     }
     
     /// 获取用户所有订阅
@@ -59,7 +86,21 @@ class SubscriptionRepository: ObservableObject {
     /// - Parameter userId: 用户ID
     /// - Returns: 活跃订阅
     func getActiveSubscription(for userId: Int) -> Subscription? {
-        return subscriptions.first { $0.userId == userId && $0.isActive && $0.isValid }
+        // 必须同时满足三个条件：属于该用户、isActive为true、未过期
+        let validSubscriptions = subscriptions.filter { 
+            $0.userId == userId && $0.isActive && $0.endDate > Date() 
+        }
+        
+        // 如果有多个有效订阅，选择结束日期最远的
+        let result = validSubscriptions.max(by: { $0.endDate < $1.endDate })
+        
+        if result == nil {
+            print("getActiveSubscription: 用户ID \(userId) 没有有效的活跃订阅")
+        } else {
+            print("getActiveSubscription: 用户ID \(userId) 有效的活跃订阅类型: \(result!.type.rawValue)")
+        }
+        
+        return result
     }
     
     /// 取消所有活跃订阅
@@ -77,11 +118,12 @@ class SubscriptionRepository: ObservableObject {
     /// 加载订阅信息
     /// - Parameter userId: 用户ID
     func loadSubscriptionsForUser(_ userId: Int) {
-        // 从本地存储加载
-        loadSubscriptionsFromStorage()
+        // 不再从本地存储加载，直接从远程获取
+        print("开始为用户ID \(userId) 加载订阅数据，直接从远程获取")
         
-        // 更新活跃订阅
-        updateActiveSubscription(for: userId)
+        // 清空当前订阅列表，确保只使用远程数据
+        subscriptions.removeAll()
+        activeSubscription = nil
         
         // 同步远程数据
         syncRemoteSubscriptionsToLocal(userId: userId)
@@ -90,13 +132,32 @@ class SubscriptionRepository: ObservableObject {
     /// 更新活跃订阅
     /// - Parameter userId: 用户ID
     private func updateActiveSubscription(for userId: Int) {
-        // 过滤出用户的有效订阅
+        // 过滤出用户的有效订阅，必须是活跃的且未过期
         let validSubscriptions = subscriptions.filter { 
             $0.userId == userId && $0.isActive && $0.endDate > Date() 
         }
         
+        // 打印订阅状态信息用于调试
+        let allUserSubscriptions = subscriptions.filter { $0.userId == userId }
+        print("用户ID: \(userId) 的所有订阅数量: \(allUserSubscriptions.count)")
+        
+        for sub in allUserSubscriptions {
+            print("订阅ID: \(sub.id), 类型: \(sub.type.rawValue), 活跃状态: \(sub.isActive), 结束日期: \(sub.endDate), 是否有效: \(sub.endDate > Date())")
+        }
+        
+        print("符合有效条件的订阅数量: \(validSubscriptions.count)")
+        
+        // 重置活跃订阅
+        activeSubscription = nil
+        
         // 如果有多个有效订阅，选择结束日期最远的
         activeSubscription = validSubscriptions.max(by: { $0.endDate < $1.endDate })
+        
+        if let active = activeSubscription {
+            print("更新活跃订阅 - 用户ID: \(userId), 订阅类型: \(active.type.rawValue), 结束日期: \(active.endDate), 来源: 远程数据")
+        } else {
+            print("用户ID: \(userId) 没有有效订阅 (基于远程数据判断)")
+        }
     }
     
     /// 清除用户订阅数据
@@ -142,12 +203,29 @@ class SubscriptionRepository: ObservableObject {
     // MARK: - 远程同步
     
     /// 同步订阅数据到远程
-    private func syncSubscriptionsToRemote() {
+    func syncSubscriptionsToRemote() {
+        // 检查同步锁，如果已锁定，跳过此次同步
+        if isSyncLocked {
+            print("同步已锁定，跳过重复请求")
+            return
+        }
+        
+        // 锁定同步，防止短时间内重复请求
+        isSyncLocked = true
+        
+        // 设置5秒后自动解锁
+        syncLockTimeout?.invalidate()
+        syncLockTimeout = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+            self?.isSyncLocked = false
+            print("同步锁定已释放，可以进行下一次同步")
+        }
+        
         guard let user = UserManager.shared.currentUser,
               user.id > 0,
               let token = user.token,
               !token.isEmpty else {
             print("无法同步订阅数据: 用户未登录或令牌无效")
+            isSyncLocked = false // 失败时解锁
             return
         }
         
@@ -157,6 +235,7 @@ class SubscriptionRepository: ObservableObject {
         // 没有订阅数据，跳过同步
         if userSubscriptions.isEmpty {
             print("用户没有订阅数据，跳过同步")
+            isSyncLocked = false // 失败时解锁
             return
         }
         
@@ -179,17 +258,23 @@ class SubscriptionRepository: ObservableObject {
                     receiveCompletion: { result in
                         if case .failure(let error) = result {
                             print("同步订阅数据失败: \(error)")
+                            // 解锁同步
+                            self.isSyncLocked = false
                         }
                     },
                     receiveValue: { data in
                         if let response = try? JSONDecoder().decode(APIResponse<String>.self, from: data) {
                             print("同步订阅数据结果: \(response.status), \(response.message ?? "")")
                         }
+                        // 解锁同步
+                        self.isSyncLocked = false
                     }
                 )
                 .store(in: &cancellables)
         } catch {
             print("处理订阅数据失败: \(error.localizedDescription)")
+            // 解锁同步
+            isSyncLocked = false
         }
     }
     
@@ -247,18 +332,60 @@ class SubscriptionRepository: ObservableObject {
                             if let remoteSubscriptions = response.data, !remoteSubscriptions.isEmpty {
                                 print("成功解码: 获取到\(remoteSubscriptions.count)条订阅记录")
                                 
-                                // 合并远程和本地订阅数据
-                                self?.mergeSubscriptions(remoteSubscriptions)
+                                // 检查是否有活跃的有效订阅
+                                let hasActiveValidSubscription = remoteSubscriptions.contains { 
+                                    $0.isActive && $0.endDate > Date() 
+                                }
                                 
-                                // 更新活跃订阅
-                                self?.updateActiveSubscription(for: userId)
-                                
-                                print("成功同步\(remoteSubscriptions.count)个订阅从远程到本地")
-                                
-                                // 通知订阅状态更新
-                                NotificationCenter.default.post(name: .subscriptionStatusDidChange, object: nil)
+                                if !hasActiveValidSubscription {
+                                    print("警告: 服务器返回的订阅中没有活跃有效的订阅，用户将被视为非会员")
+                                    
+                                    // 直接使用远程数据，不做本地激活
+                                    self?.subscriptions = remoteSubscriptions
+                                    self?.activeSubscription = nil
+                                    
+                                    // 保存到本地
+                                    self?.saveSubscriptionsToStorage()
+                                    
+                                    // 发送订阅状态更新通知
+                                    NotificationCenter.default.post(name: .subscriptionStatusDidChange, object: nil)
+                                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                                } else {
+                                    // 有有效的活跃订阅，使用远程数据
+                                    self?.subscriptions = remoteSubscriptions
+                                    
+                                    // 更新活跃订阅
+                                    self?.updateActiveSubscription(for: userId)
+                                    
+                                    // 保存到本地
+                                    self?.saveSubscriptionsToStorage()
+                                    
+                                    print("成功同步\(remoteSubscriptions.count)个订阅从远程到本地")
+                                    
+                                    // 通知订阅状态更新
+                                    NotificationCenter.default.post(name: .subscriptionStatusDidChange, object: nil)
+                                }
                             } else {
                                 print("远程订阅数据为空")
+                                
+                                // 如果远程没有订阅数据，清除该用户的本地订阅
+                                if let self = self {
+                                    print("清除用户ID \(userId) 的本地订阅数据...")
+                                    
+                                    // 保存当前的订阅状态以检测是否需要发送通知
+                                    let hadActiveSubscription = self.getActiveSubscription(for: userId) != nil
+                                    
+                                    // 清除该用户的所有订阅
+                                    self.clearSubscriptions(for: userId)
+                                    
+                                    print("用户的本地订阅数据已清除")
+                                    
+                                    // 如果之前有活跃订阅，发送状态更新通知
+                                    if hadActiveSubscription {
+                                        NotificationCenter.default.post(name: .subscriptionStatusDidChange, object: nil)
+                                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                                    }
+                                }
                             }
                         } else {
                             print("远程数据获取失败: 状态码不为success")
@@ -323,11 +450,14 @@ class SubscriptionRepository: ObservableObject {
                             if !parsedSubscriptions.isEmpty {
                                 print("手动解析成功: 获取到\(parsedSubscriptions.count)条订阅记录")
                                 
-                                // 合并远程和本地订阅数据
-                                self?.mergeSubscriptions(parsedSubscriptions)
+                                // 直接使用解析出的远程数据
+                                self?.subscriptions = parsedSubscriptions
                                 
                                 // 更新活跃订阅
                                 self?.updateActiveSubscription(for: userId)
+                                
+                                // 保存到本地
+                                self?.saveSubscriptionsToStorage()
                                 
                                 // 通知订阅状态更新
                                 NotificationCenter.default.post(name: .subscriptionStatusDidChange, object: nil)
@@ -344,28 +474,13 @@ class SubscriptionRepository: ObservableObject {
     /// 合并本地和远程订阅数据
     /// - Parameter remoteSubscriptions: 远程订阅数据
     private func mergeSubscriptions(_ remoteSubscriptions: [Subscription]) {
-        var mergedSubscriptions = [UUID: Subscription]()
+        // 不再进行合并，直接使用远程数据
+        subscriptions = remoteSubscriptions
         
-        // 先保存所有本地订阅
-        for subscription in subscriptions {
-            mergedSubscriptions[subscription.id] = subscription
+        // 确保在处理后更新活跃订阅
+        if let user = UserManager.shared.currentUser {
+            updateActiveSubscription(for: user.id)
         }
-        
-        // 合并或添加远程订阅
-        for remote in remoteSubscriptions {
-            // 如果本地有相同ID的订阅，使用更新时间较新的版本
-            if let local = mergedSubscriptions[remote.id] {
-                if remote.updatedAt > local.updatedAt {
-                    mergedSubscriptions[remote.id] = remote
-                }
-            } else {
-                // 本地没有，直接添加
-                mergedSubscriptions[remote.id] = remote
-            }
-        }
-        
-        // 更新订阅列表
-        subscriptions = Array(mergedSubscriptions.values)
         
         // 保存到本地
         saveSubscriptionsToStorage()

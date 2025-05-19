@@ -1269,42 +1269,80 @@ class UserManager: ObservableObject {
     // MARK: - 文档导入限制
     
     /// 减少用户剩余导入数量
+    /// - Parameter completion: 操作完成的回调，返回布尔值表示操作是否成功
     /// - Returns: 操作是否成功
-    func decreaseRemainingImportCount() -> Bool {
-        guard var user = currentUser else { return false }
+    func decreaseRemainingImportCount(completion: ((Bool) -> Void)? = nil) -> Bool {
+        guard var user = currentUser else {
+            print("减少导入次数失败: 当前用户为空")
+            completion?(false)
+            return false
+        }
         
         // 如果用户有订阅，不减少导入数量
         if user.hasActiveSubscription {
+            print("用户有活跃订阅，不减少导入次数")
+            completion?(true)
             return true
         }
         
+        print("当前剩余导入次数: \(user.remainingImportCount)")
+        
         // 如果剩余导入数为0，则不能再减少
         if user.remainingImportCount <= 0 {
+            print("剩余导入次数已为0，无法减少")
+            completion?(false)
             return false
         }
         
         // 减少导入数量
         user.remainingImportCount -= 1
+        print("减少后的导入次数: \(user.remainingImportCount)")
         
         // 更新用户数据
         currentUser = user
         saveUserToStorage(user: user)
+        print("已更新本地用户数据")
+        
+        // 立即发送通知刷新UI
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            print("本地减少导入次数后立即发送通知刷新UI")
+        }
         
         // 如果用户已登录，同步数据到远程
         if user.isTokenValid && user.id > 0 {
-            syncRemainingImportCount(user: user)
+            print("开始同步剩余导入次数到远程")
+            syncRemainingImportCount(user: user) { success in
+                print("同步导入次数到远程完成，结果: \(success ? "成功" : "失败")")
+                // 仅在同步失败时才回调失败状态
+                if !success {
+                    completion?(false)
+                } else {
+                    completion?(true)
+                }
+            }
+        } else {
+            print("用户未登录或ID无效，跳过远程同步")
+            completion?(true) // 本地更新成功即视为成功
         }
         
         return true
     }
     
-    /// 将导入数量同步到远程
-    /// - Parameter user: 用户对象
-    private func syncRemainingImportCount(user: User) {
-        guard user.isTokenValid && user.id > 0, let token = user.token else { return }
+    /// 将导入数量同步到远程，并等待同步完成
+    /// - Parameters:
+    ///   - user: 用户对象
+    ///   - completion: 同步完成的回调
+    private func syncRemainingImportCount(user: User, completion: ((Bool) -> Void)? = nil) {
+        guard user.isTokenValid && user.id > 0, let token = user.token else {
+            print("同步导入次数失败: 用户令牌无效")
+            completion?(false)
+            return
+        }
         
         // 将数据转换为JSON
         let dataValue = String(user.remainingImportCount)
+        print("同步导入次数到远程: userId=\(user.id), count=\(dataValue)")
         
         // 使用NetworkManager保存数据
         NetworkManager.shared.saveUserData(userId: user.id, token: token, dataKey: "remaining_import_count", dataValue: dataValue)
@@ -1313,10 +1351,16 @@ class UserManager: ObservableObject {
                 receiveCompletion: { result in
                     if case .failure(let error) = result {
                         print("同步导入数量失败: \(error)")
+                        completion?(false)
+                    } else {
+                        // 由于在本地减少操作时已经发送了通知，这里不再重复发送
+                        print("远程同步导入数量成功")
+                        completion?(true)
                     }
                 },
                 receiveValue: { message in
                     print("同步导入数量成功: \(message)")
+                    // 不在这里调用completion，因为它将在receiveCompletion中被调用
                 }
             )
             .store(in: &cancellables)

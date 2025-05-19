@@ -218,13 +218,25 @@ class NetworkManager {
             "data_value": dataValue
         ]
         
+        print("保存用户数据 - userId: \(userId), dataKey: \(dataKey), dataLength: \(dataValue.count)")
+        
         return request(endpoint: "/save_user_data.php", method: "POST", parameters: parameters)
+            .handleEvents(receiveOutput: { data in
+                print("保存用户数据: 已收到响应，数据大小为 \(data.count) 字节")
+                if let responseString = String(data: data, encoding: .utf8) {
+                    print("原始响应数据: \(responseString)")
+                }
+            })
             .decode(type: APIResponse<String>.self, decoder: createDateFormattedDecoder())
+            .handleEvents(receiveOutput: { response in
+                print("保存用户数据: 解码响应 - 状态: \(response.status), 消息: \(response.message ?? "无")")
+            })
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
                     return .decodingError(decodingError)
                 } else if let networkError = error as? NetworkError {
+                    print("网络错误: \(networkError)")
                     return networkError
                 } else {
                     print("未知错误: \(error)")
@@ -233,10 +245,12 @@ class NetworkManager {
             }
             .flatMap { response -> AnyPublisher<String, NetworkError> in
                 if response.status == "success" {
+                    print("保存用户数据成功: \(dataKey)")
                     return Just(response.message ?? "数据保存成功")
                         .setFailureType(to: NetworkError.self)
                         .eraseToAnyPublisher()
                 } else {
+                    print("保存用户数据失败: \(response.message ?? "未知错误")")
                     return Fail(error: .apiError(response.message ?? "未知错误"))
                         .eraseToAnyPublisher()
                 }

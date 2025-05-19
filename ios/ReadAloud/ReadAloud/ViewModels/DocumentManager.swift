@@ -315,7 +315,13 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             
             // 如果导入成功，减少用户剩余导入次数
             if result {
-                UserManager.shared.decreaseRemainingImportCount()
+                print("开始减少用户剩余导入次数")
+                UserManager.shared.decreaseRemainingImportCount { success in
+                    print("减少剩余导入次数结果: \(success ? "成功" : "失败")")
+                    if !success {
+                        print("警告: 导入文档成功但减少导入次数失败，可能是远程同步失败")
+                    }
+                }
             }
             
             parent.completion(result)
