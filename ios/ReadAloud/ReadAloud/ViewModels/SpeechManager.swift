@@ -3,6 +3,8 @@ import AVFoundation
 import MediaPlayer
 import Combine
 
+
+
 /// 播放模式枚举
 enum PlaybackMode: String, CaseIterable {
     case singlePlay = "单篇播放"  // 播放完当前文章后停止
@@ -32,6 +34,19 @@ class SpeechManager: ObservableObject {
     // 语音合成器和代理
     private let synthesizer = AVSpeechSynthesizer()
     private let speechDelegate = SpeechDelegate.shared
+    
+    // 文本转音频转换器
+    private let textToSpeechConverter = TextToSpeechConverter.shared
+    
+    // 音频播放器
+    private let audioPlayerManager = AudioPlayerManager.shared
+    
+    // 静默音频播放器，用于触发控制中心显示
+    private var silentAudioPlayer: AVAudioPlayer?
+    
+    // 转换状态
+    @Published var isConverting = false
+    @Published var conversionProgress: Float = 0
     
     // 当前朗读状态
     @Published var isPlaying = false
@@ -167,6 +182,9 @@ class SpeechManager: ObservableObject {
         // 配置音频会话
         setupAudioSession()
         
+        // 初始化静默音频播放器
+        setupSilentAudioPlayer()
+        
         // 加载保存的播放模式
         if let savedMode = UserDefaults.standard.string(forKey: UserDefaultsKeys.playbackMode),
            let mode = PlaybackMode(rawValue: savedMode) {
@@ -191,16 +209,44 @@ class SpeechManager: ObservableObject {
                 self?.loadLastPlayedArticles()
             }
             .store(in: &cancellables)
+        
+        // 监听音频播放结束通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioPlaybackFinished),
+            name: NSNotification.Name("AudioPlaybackFinished"),
+            object: nil
+        )
+        
+        // 监听音频播放错误通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioPlaybackError),
+            name: NSNotification.Name("AudioPlaybackError"),
+            object: nil
+        )
+        
+        // 清理过期的音频缓存文件
+        textToSpeechConverter.cleanupOldCacheFiles()
     }
     
     // 设置音频会话
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay, .duckOthers, .mixWithOthers])
+            // 设置音频会话类别为播放
+            try AVAudioSession.sharedInstance().setCategory(
+                .playback,
+                mode: .spokenAudio,
+                options: [.allowAirPlay, .duckOthers, .mixWithOthers]
+            )
+            
+            // 设置音频会话为活跃状态
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
             
             // 注册远程控制事件
             setupRemoteTransportControls()
+            
+            print("音频会话配置成功")
         } catch {
             print("设置音频会话失败: \(error.localizedDescription)")
         }
@@ -208,11 +254,24 @@ class SpeechManager: ObservableObject {
     
     // 设置远程控制
     private func setupRemoteTransportControls() {
+        print("设置远程控制...")
+        
+        // 确保能接收远程控制事件
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        
         // 获取远程控制中心
         let commandCenter = MPRemoteCommandCenter.shared()
         
+        // 移除所有现有的目标
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
+        
         // 添加播放/暂停处理
         commandCenter.playCommand.addTarget { [weak self] _ in
+            print("收到远程播放命令")
             guard let self = self, !self.isPlaying else { return .success }
             
             if self.isResuming {
@@ -224,14 +283,30 @@ class SpeechManager: ObservableObject {
         }
         
         commandCenter.pauseCommand.addTarget { [weak self] _ in
+            print("收到远程暂停命令")
             guard let self = self, self.isPlaying else { return .success }
             self.pauseSpeaking(updateGlobalState: false)
+            return .success
+        }
+        
+        // 添加播放/暂停切换命令
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            print("收到远程切换播放/暂停命令")
+            guard let self = self else { return .success }
+            if self.isPlaying {
+                self.pauseSpeaking(updateGlobalState: false)
+            } else if self.isResuming {
+                self.startSpeakingFromPosition(self.currentPlaybackPosition)
+            } else {
+                self.startSpeaking()
+            }
             return .success
         }
         
         // 添加前进/后退处理
         commandCenter.skipForwardCommand.preferredIntervals = [15]
         commandCenter.skipForwardCommand.addTarget { [weak self] event in
+            print("收到远程前进命令")
             guard let self = self,
                   let skipEvent = event as? MPSkipIntervalCommandEvent else { return .success }
             self.skipForward(seconds: skipEvent.interval)
@@ -240,11 +315,14 @@ class SpeechManager: ObservableObject {
         
         commandCenter.skipBackwardCommand.preferredIntervals = [15]
         commandCenter.skipBackwardCommand.addTarget { [weak self] event in
+            print("收到远程后退命令")
             guard let self = self,
                   let skipEvent = event as? MPSkipIntervalCommandEvent else { return .success }
             self.skipBackward(seconds: skipEvent.interval)
             return .success
         }
+        
+        print("远程控制设置完成")
     }
     
     // 设置朗读状态监听器
@@ -673,22 +751,51 @@ class SpeechManager: ObservableObject {
     private func updateNowPlayingInfo() {
         guard let article = currentArticle else { return }
         
+        print("更新锁屏界面信息...")
+        
         // 创建信息字典
         var nowPlayingInfo = [String: Any]()
         
         // 设置标题和详情
         nowPlayingInfo[MPMediaItemPropertyTitle] = article.title
-        nowPlayingInfo[MPMediaItemPropertyArtist] = "ReadAloud App"
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "ReadAloud文本朗读"
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "文本朗读器"
         
         // 设置总时长和当前播放位置
-        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = totalTime
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = NSNumber(value: totalTime)
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = NSNumber(value: currentTime)
         
         // 设置播放速率
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? NSNumber(value: selectedRate) : NSNumber(value: 0.0)
         
-        // 应用信息到锁屏
+        // 添加媒体类型信息
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = NSNumber(value: MPNowPlayingInfoMediaType.audio.rawValue)
+        
+        // 添加默认播放速率，让控制中心显示播放控件
+        nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = NSNumber(value: 1.0)
+        
+        // 添加封面图片
+        if let image = UIImage(named: "AppIcon") {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
+                return image
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        }
+        
+        // 应用信息到锁屏和控制中心
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        // 确保远程命令中心已启用
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        
+        // 如果正在播放，确保静默音频播放器也在播放
+        if isPlaying {
+            startSilentAudio()
+        } else if let player = silentAudioPlayer, player.isPlaying {
+            player.pause()
+        }
+        
+        print("已更新控制中心显示信息")
     }
     
     // 开始朗读全文
@@ -708,6 +815,110 @@ class SpeechManager: ObservableObject {
             return
         }
         
+        // 检查是否有文章
+        guard let article = currentArticle else {
+            print("错误：当前没有设置文章，无法开始朗读")
+            return
+        }
+        
+        // 检查文本是否为空
+        if currentText.isEmpty {
+            print("错误：当前文章内容为空，无法开始朗读")
+            return
+        }
+        
+        // 尝试使用文本转音频方式播放
+        convertAndPlayAudio()
+    }
+    
+    // 使用文本转音频方式播放
+    private func convertAndPlayAudio() {
+        guard let article = currentArticle else { return }
+        
+        // 更新状态
+        isConverting = true
+        conversionProgress = 0
+        
+        // 获取语音设置
+        let voice = getSelectedVoice()
+        let rate = Float(selectedRate * 0.4) // 转换为AVSpeechUtterance接受的范围
+        
+        print("开始转换文本为音频...")
+        
+        // 设置音频会话为活跃状态
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("激活音频会话失败: \(error)")
+        }
+        
+        // 订阅进度更新
+        // 注意：这里可能会导致内存泄漏，实际项目中应该存储订阅并在适当时机取消
+        textToSpeechConverter.progressPublisher
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in
+                self?.conversionProgress = progress
+            }
+            .store(in: &cancellables)
+        
+        // 获取音频文件
+        textToSpeechConverter.getAudioFileForText(
+            text: currentText,
+            voice: voice,
+            rate: rate
+        ) { [weak self] audioFileURL in
+            guard let self = self, let audioFileURL = audioFileURL else {
+                print("文本转音频失败，尝试使用传统方式播放")
+                DispatchQueue.main.async {
+                    self?.isConverting = false
+                    self?.startSpeakingWithSynthesizer()
+                }
+                return
+            }
+            
+            // 转换完成，更新状态
+            DispatchQueue.main.async {
+                self.isConverting = false
+                
+                // 记录播放开始的时间戳
+                if let articleId = self.currentArticle?.id {
+                    let now = Date()
+                    UserDefaults.standard.set(now.timeIntervalSince1970, forKey: UserDefaultsKeys.lastPlayTime(for: articleId))
+                    
+                    // 记录当前我们正在朗读这篇文章
+                    UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+                    
+                    // 更新全局播放状态
+                    let contentType: PlaybackContentType = articleId.description.hasPrefix("doc-") ? .document : .article
+                    self.playbackManager.startPlayback(contentId: articleId, title: self.currentArticle?.title ?? "", type: contentType)
+                }
+                
+                // 使用音频播放器播放
+                self.audioPlayerManager.playAudio(
+                    url: audioFileURL,
+                    title: article.title,
+                    artist: "ReadAloud朗读器"
+                )
+                
+                // 更新状态
+                self.isPlaying = true
+                self.isResuming = false
+                
+                // 更新控制中心显示
+                self.updateNowPlayingInfo()
+                
+                // 开始定时器更新进度
+                self.startTimer()
+                
+                print("音频文件播放开始")
+            }
+        }
+    }
+    
+    // 使用传统的AVSpeechSynthesizer直接播放
+    private func startSpeakingWithSynthesizer() {
+        print("使用传统的AVSpeechSynthesizer直接播放")
+        
         // 检查合成器当前状态
         if synthesizer.isSpeaking {
             print("检测到合成器正在朗读，先停止当前朗读")
@@ -726,29 +937,11 @@ class SpeechManager: ObservableObject {
             print("⚠️ 警告：检测到isArticleSwitching=true，这可能会影响播放完成的处理逻辑")
         }
         
-        // 开始朗读全文，进行额外的安全检查
-        print("开始朗读全文，进行额外的安全检查")
-        
-        // 检查是否有文章
-        if currentArticle == nil {
-            print("错误：当前没有设置文章，无法开始朗读")
-            return
-        }
-        
-        // 检查文本是否为空
-        if currentText.isEmpty {
-            print("错误：当前文章内容为空，无法开始朗读")
-            return
-        }
-        
         // 调用实际的开始朗读方法
         doStartSpeaking()
-        
-        print("开始朗读完成")
-        print("=======================================")
     }
     
-    // 实际执行朗读的内部方法
+    // 实际执行朗读的内部方法 (使用传统AVSpeechSynthesizer)
     private func doStartSpeaking() {
         // 重置进度和时间
         currentProgress = 0.0
@@ -793,15 +986,15 @@ class SpeechManager: ObservableObject {
             playbackManager.startPlayback(contentId: articleId, title: currentArticle?.title ?? "", type: contentType)
         }
         
-        // 开始朗读
-        synthesizer.speak(utterance)
-        
         // 更新状态
         isPlaying = true
         isResuming = false  // 重置恢复状态，因为现在已经开始播放了
         
-        // 更新锁屏界面信息
+        // 更新锁屏界面信息 - 先更新以确保控制中心显示
         updateNowPlayingInfo()
+        
+        // 开始朗读
+        synthesizer.speak(utterance)
         
         // 开始定时器更新进度
         startTimer()
@@ -820,173 +1013,133 @@ class SpeechManager: ObservableObject {
         print("指定位置: \(position)")
         print("文本总长度: \(currentText.count)")
         
-        // 检查合成器当前状态
-        let wasSpeaking = synthesizer.isSpeaking
-        
-        // 如果正在播放，先停止当前播放
-        if wasSpeaking {
-            print("停止当前播放")
-            synthesizer.stopSpeaking(at: .immediate)
-            speechDelegate.isSpeaking = false
-            stopTimer()
-            
-            // 添加短暂延迟，确保停止操作完成
-            if position > 0 { // 只在真正需要从中间位置开始时添加延迟
-                print("添加短暂延迟，确保停止操作完成")
-                Thread.sleep(forTimeInterval: 0.1) // 小延迟以确保停止已处理
-            }
-        }
-        
         // 安全检查：确保位置在有效范围内
         let safePosition = max(0, min(position, currentText.count - 1))
         if safePosition != position {
             print("位置超出范围，调整为安全位置: \(safePosition)")
         }
         
-        // 判断是否是从中间位置开始的新播放
-        let isResumeFromMiddle = safePosition > 0 && safePosition < currentText.count - 1
-        
-        // 检查当前文章切换状态
-        if speechDelegate.isArticleSwitching {
-            print("⚠️ 警告：从指定位置开始播放时检测到isArticleSwitching=true，这可能会影响播放完成的处理逻辑")
-        }
-        
-        // 如果是从中间位置开始的播放（非开头非结尾），应该被视为用户操作，不应触发自动"下一篇"逻辑
-        if isResumeFromMiddle || isResuming {
-            print("从中间位置开始播放或恢复播放，标记为用户操作")
-            // 设置手动暂停标志，防止播放完成后自动跳转
-            speechDelegate.wasManuallyPaused = true
-        } else {
-            // 只有从头开始播放时才重置手动暂停标志
-            speechDelegate.wasManuallyPaused = false
-            print("从头开始播放，重置手动暂停标志")
-        }
-        
-        // 设置朗读起始位置
-        speechDelegate.startPosition = safePosition
-        
-        // 立即更新进度和高亮范围 - 使用工具方法确保一致性
-        forceUpdateUI(position: safePosition)
-        
-        if let articleId = currentArticle?.id {
-            // 记录播放开始的时间戳
-            let now = Date()
-            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: UserDefaultsKeys.lastPlayTime(for: articleId))
-            
-            // 记录当前我们正在朗读这篇文章
-            UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
-            
-            // 更新全局播放状态
-            let contentType: PlaybackContentType = articleId.description.hasPrefix("doc-") ? .document : .article
-            playbackManager.startPlayback(contentId: articleId, title: currentArticle?.title ?? "", type: contentType)
-        }
-        
-        if safePosition >= currentText.count || currentText.isEmpty {
-            print("位置无效或文本为空，从头开始播放")
-            startSpeaking()
-            return
-        }
-        
         // 获取从指定位置开始的子字符串
         let startIndex = currentText.index(currentText.startIndex, offsetBy: safePosition)
         let subText = String(currentText[startIndex...])
         
-        // 安全检查：确保子文本非空且长度合理
-        if subText.isEmpty {
-            print("截取的子文本为空，从头开始播放")
-            startSpeaking()
-            return
+        guard let article = currentArticle else { return }
+        
+        // 尝试使用文本转音频方式播放子文本
+        // 更新状态
+        isConverting = true
+        conversionProgress = 0
+        
+        // 获取语音设置
+        let voice = getSelectedVoice()
+        let rate = Float(selectedRate * 0.4)
+        
+        print("开始转换文本为音频...")
+        
+        // 设置音频会话为活跃状态
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("激活音频会话失败: \(error)")
         }
         
-        // 新增: 检查如果剩余文本太短且接近文章末尾，应该从头开始或跳到下一篇
-        let isNearEnd = safePosition > (currentText.count * 9 / 10) // 最后10%
-        let isShortText = subText.count < 50 // 文本少于50个字符视为短文本
+        // 订阅进度更新
+        textToSpeechConverter.progressPublisher
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in
+                self?.conversionProgress = progress
+            }
+            .store(in: &cancellables)
         
-        if isNearEnd && isShortText {
-            print("检测到剩余文本过短且接近末尾，可能导致无限循环问题")
-            
-            // 根据不同播放模式执行相应操作
-            if playbackMode == .singleRepeat {
-                print("单篇循环模式下，直接重置到文章开头")
-                // 重置位置为0
-                speechDelegate.startPosition = 0
-                
-                // 确保正确设置标志 - 使用新的标志而不是手动暂停标志
-                speechDelegate.wasManuallyPaused = false
-                speechDelegate.isNearArticleEnd = true
-                
-                // 立即更新进度和高亮范围
-                forceUpdateUI(position: 0)
-                
-                // 从头开始播放
-                startSpeaking()
-                return
-            } else if playbackMode == .listRepeat {
-                print("列表循环模式下，准备播放下一篇文章")
-                
-                // 设置处理标志，防止重复处理
-                if !isProcessingNextArticle {
-                    isProcessingNextArticle = true
+        // 记录起始位置
+        speechDelegate.startPosition = safePosition
+        forceUpdateUI(position: safePosition)
+        
+        // 获取音频文件
+        textToSpeechConverter.convertTextToSpeech(
+            text: subText,
+            voice: voice,
+            rate: rate
+        ) { [weak self] audioFileURL in
+            guard let self = self, let audioFileURL = audioFileURL else {
+                print("文本转音频失败，尝试使用传统方式播放")
+                DispatchQueue.main.async {
+                    self?.isConverting = false
                     
-                    // 停止当前播放
-                    stopSpeaking(resetResumeState: true)
-                    
-                    // 重置起始位置
-                    speechDelegate.startPosition = 0
-                    speechDelegate.wasManuallyPaused = false
-                    
-                    // 立即更新进度和高亮范围
-                    forceUpdateUI(position: 0)
-                    
-                    // 延迟发送通知，确保UI有时间更新
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        NotificationCenter.default.post(
-                            name: Notification.Name("PlayNextArticle"),
-                            object: nil
-                        )
-                        
-                        // 延迟重置处理标志
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.isProcessingNextArticle = false
-                        }
+                    // 使用传统方式从指定位置播放
+                    if self?.synthesizer.isSpeaking == true {
+                        self?.synthesizer.stopSpeaking(at: .immediate)
                     }
-                    return
+                    
+                    // 创建语音合成器使用的话语对象
+                    let utterance = AVSpeechUtterance(string: subText)
+                    
+                    // 设置语音参数
+                    if let voice = self?.getSelectedVoice() {
+                        utterance.voice = voice
+                    } else {
+                        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+                    }
+                    utterance.rate = Float(self?.selectedRate ?? 0.5) * 0.4
+                    utterance.pitchMultiplier = 1.0
+                    utterance.volume = 1.0
+                    
+                    // 关联utterance和位置
+                    self?.speechDelegate.setPosition(for: utterance, position: safePosition)
+                    
+                    // 开始朗读
+                    self?.synthesizer.speak(utterance)
+                    
+                    // 更新状态
+                    self?.isPlaying = true
+                    self?.isResuming = false
+                    
+                    // 更新控制中心显示
+                    self?.updateNowPlayingInfo()
+                    
+                    // 开始定时器更新进度
+                    self?.startTimer()
                 }
+                return
+            }
+            
+            // 转换完成，更新状态
+            DispatchQueue.main.async {
+                self.isConverting = false
+                
+                // 记录播放开始的时间戳
+                if let articleId = self.currentArticle?.id {
+                    let now = Date()
+                    UserDefaults.standard.set(now.timeIntervalSince1970, forKey: UserDefaultsKeys.lastPlayTime(for: articleId))
+                    
+                    // 记录当前我们正在朗读这篇文章
+                    UserDefaults.standard.set(true, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+                    
+                    // 更新全局播放状态
+                    let contentType: PlaybackContentType = articleId.description.hasPrefix("doc-") ? .document : .article
+                    self.playbackManager.startPlayback(contentId: articleId, title: self.currentArticle?.title ?? "", type: contentType)
+                }
+                
+                // 使用音频播放器播放
+                self.audioPlayerManager.playAudio(
+                    url: audioFileURL,
+                    title: article.title,
+                    artist: "ReadAloud朗读器"
+                )
+                
+                // 更新状态
+                self.isPlaying = true
+                self.isResuming = false
+                
+                // 更新控制中心显示
+                self.updateNowPlayingInfo()
+                
+                // 开始定时器更新进度
+                self.startTimer()
+                
+                print("从位置 \(safePosition) 开始播放音频")
             }
         }
-        
-        print("从位置 \(safePosition) 开始播放文本，长度: \(subText.count)")
-        
-        // 创建语音合成器使用的话语对象
-        let utterance = AVSpeechUtterance(string: subText)
-        
-        // 设置语音参数，应用选择的语音
-        if let voice = getSelectedVoice() {
-            utterance.voice = voice
-        } else {
-            utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
-        }
-        
-        // 设置语速
-        utterance.rate = Float(selectedRate) * 0.4
-        utterance.pitchMultiplier = 1.0
-        utterance.volume = 1.0
-        
-        // 关联utterance和位置
-        speechDelegate.setPosition(for: utterance, position: safePosition)
-        
-        // 开始朗读
-        synthesizer.speak(utterance)
-        
-        // 更新状态
-        isPlaying = true
-        isResuming = false  // 重置恢复状态，因为现在已经开始播放了
-        
-        // 更新锁屏界面信息
-        updateNowPlayingInfo()
-        
-        // 开始定时器更新进度
-        startTimer()
     }
     
     // 暂停朗读
@@ -999,6 +1152,8 @@ class SpeechManager: ObservableObject {
             print("暂停操作太频繁，忽略")
             return
         }
+        
+        print("暂停朗读")
         
         // 记录当前位置，确保能正确恢复
         currentPlaybackPosition = calculateCurrentPosition()
@@ -1013,23 +1168,30 @@ class SpeechManager: ObservableObject {
         // 设置手动暂停标志，防止自动触发下一篇
         speechDelegate.wasManuallyPaused = true
         
-        // 记录下播放位置
-        if !synthesizer.isPaused {
-            synthesizer.pauseSpeaking(at: .immediate)
+        // 如果使用的是音频播放器，暂停它
+        if audioPlayerManager.isPlaying {
+            audioPlayerManager.pause()
         }
         
-        // 检查合成器是否仍在朗读
+        // 如果使用的是语音合成器，暂停它
         if synthesizer.isSpeaking {
-            print("⚠️ 警告：暂停后合成器仍在朗读，强制停止")
-            synthesizer.stopSpeaking(at: .immediate)
+            synthesizer.pauseSpeaking(at: .immediate)
+            
+            // 检查合成器是否仍在朗读
+            if synthesizer.isSpeaking {
+                print("⚠️ 警告：暂停后合成器仍在朗读，强制停止")
+                synthesizer.stopSpeaking(at: .immediate)
+            }
         }
         
         // 停止计时器
-        timer?.invalidate()
-        timer = nil
+        stopTimer()
         
         // 更新状态
         isPlaying = false
+        
+        // 更新控制中心显示
+        updateNowPlayingInfo()
         
         // 保存播放进度
         if let articleId = currentArticle?.id {
@@ -1041,14 +1203,7 @@ class SpeechManager: ObservableObject {
             // 无论updateGlobalState参数如何，始终更新全局状态
             // 这是为了确保全局状态与本地状态一致
             playbackManager.pausePlayback()
-            
-            // 添加额外的日志
-            print("暂停朗读 - 已更新本地状态和全局状态")
-            print("本地状态: isPlaying=\(isPlaying), 全局状态: \(playbackManager.isPlaying)")
         }
-        
-        // 更新锁屏控制中心信息
-        updateNowPlayingInfo()
         
         // 检查是否是被定时器触发的暂停
         let timerManager = TimerManager.shared
@@ -1060,51 +1215,45 @@ class SpeechManager: ObservableObject {
     
     // 停止朗读
     func stopSpeaking(resetResumeState: Bool = true) {
-        if synthesizer.isSpeaking {
-            // 保存当前播放进度（在重置之前）
-            savePlaybackProgress()
-            
-            // 添加检测逻辑：如果没有设置手动暂停标志，则这可能是系统自动停止
-            // 为防止触发自动播放下一篇的逻辑，设置手动暂停标志
-            if !speechDelegate.wasManuallyPaused && !speechDelegate.isArticleSwitching {
-                print("检测到未设置标志，设置wasManuallyPaused=true防止触发自动播放")
-                speechDelegate.wasManuallyPaused = true
-            }
-            
-            synthesizer.stopSpeaking(at: .immediate)
-            
-            // 重置所有状态
-            speechDelegate.isSpeaking = false
-            speechDelegate.startPosition = 0
-            speechDelegate.isNearArticleEnd = false  // 确保重置接近文章末尾标志
-            
-            // 只有在指定需要重置恢复状态时才重置
-            if resetResumeState {
-                isResuming = false
-                currentPlaybackPosition = 0
-                
-                // 重置进度
-                currentProgress = 0.0
-                currentTime = 0.0
-                
-                // 清除保存的播放进度
-                if let articleId = currentArticle?.id {
-                    UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
-                    UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress(for: articleId))
-                    UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
-                    UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
-                }
-            }
-            
-            // 更新状态
-            isPlaying = false
-            
-            // 更新全局播放状态
-            playbackManager.stopPlayback()
-            
-            // 停止定时器
-            stopTimer()
+        print("停止朗读")
+        
+        // 如果使用的是音频播放器，停止它
+        if audioPlayerManager.isPlaying {
+            audioPlayerManager.stopPlayback()
         }
+        
+        // 如果使用的是语音合成器，停止它
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        
+        // 停止进度定时器
+        stopTimer()
+        
+        // 更新状态
+        isPlaying = false
+        
+        // 只有在需要重置恢复状态时才重置
+        if resetResumeState {
+            isResuming = false
+            currentPlaybackPosition = 0
+            currentProgress = 0.0
+            currentTime = 0.0
+            
+            // 清除保存的播放进度
+            if let articleId = currentArticle?.id {
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            }
+        }
+        
+        // 更新控制中心显示
+        updateNowPlayingInfo()
+        
+        // 通知全局播放状态管理器
+        playbackManager.stopPlayback()
     }
     
     // 跳转到指定进度位置
@@ -1921,5 +2070,129 @@ class SpeechManager: ObservableObject {
         currentText = ""
         
         print("播放列表和相关状态已清空")
+    }
+    
+    // 清除锁屏界面信息
+    private func clearNowPlayingInfo() {
+        // 清空控制中心的播放信息
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        // 停止接收远程控制事件
+        UIApplication.shared.endReceivingRemoteControlEvents()
+    }
+    
+    // 在对象销毁时释放资源
+    deinit {
+        clearNowPlayingInfo()
+        print("SpeechManager已释放")
+    }
+    
+    // 处理音频播放结束事件
+    @objc private func handleAudioPlaybackFinished() {
+        print("====== 音频播放结束 ======")
+        
+        // 更新状态
+        isPlaying = false
+        
+        // 如果启用了循环播放，根据模式决定下一步操作
+        switch playbackMode {
+        case .singlePlay:
+            print("单篇播放模式：播放结束")
+            // 重置所有状态
+            isResuming = false
+            currentPlaybackPosition = 0
+            currentProgress = 0.0
+            currentTime = 0.0
+            
+            // 清除保存的播放进度
+            if let articleId = currentArticle?.id {
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackPosition(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastProgress(for: articleId))
+                UserDefaults.standard.removeObject(forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
+                UserDefaults.standard.set(false, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            }
+            
+        case .singleRepeat:
+            print("单篇循环模式：准备重新播放")
+            
+            // 重置状态
+            isResuming = false
+            currentPlaybackPosition = 0
+            currentProgress = 0.0
+            currentTime = 0.0
+            
+            // 延迟一点再开始播放
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.startSpeaking()
+            }
+            
+        case .listRepeat:
+            print("列表循环模式：准备播放下一篇")
+            
+            // 特殊处理：防止由于多次触发导致的重复播放
+            if !isProcessingNextArticle {
+                isProcessingNextArticle = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.playNextArticle()
+                    
+                    // 延迟重置标志，确保通知已被处理
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.isProcessingNextArticle = false
+                    }
+                }
+            } else {
+                print("已在处理下一篇文章请求，忽略重复触发")
+            }
+        }
+    }
+    
+    // 处理音频播放错误事件
+    @objc private func handleAudioPlaybackError(_ notification: Notification) {
+        print("====== 音频播放错误 ======")
+        if let error = notification.object as? Error {
+            print("错误详情: \(error.localizedDescription)")
+        }
+        
+        // 更新状态
+        isPlaying = false
+        
+        // 尝试使用传统方式播放
+        print("尝试使用传统的AVSpeechSynthesizer直接播放")
+        startSpeakingWithSynthesizer()
+    }
+    
+    // 设置静默音频播放器
+    private func setupSilentAudioPlayer() {
+        guard let silentSoundURL = Bundle.main.url(forResource: "silence", withExtension: "mp3") else {
+            print("无法找到静默音频文件，需要创建一个")
+            createSilentAudioFile()
+            return
+        }
+        
+        do {
+            silentAudioPlayer = try AVAudioPlayer(contentsOf: silentSoundURL)
+            silentAudioPlayer?.numberOfLoops = -1 // 无限循环
+            silentAudioPlayer?.volume = 0.0 // 静音
+            silentAudioPlayer?.prepareToPlay()
+            print("静默音频播放器初始化成功")
+        } catch {
+            print("创建静默音频播放器失败: \(error)")
+            createSilentAudioFile()
+        }
+    }
+    
+    // 创建静默音频文件
+    private func createSilentAudioFile() {
+        // 这里只是记录，实际应该在应用构建时添加一个静默的mp3文件
+        print("需要在应用包中添加一个静默的mp3文件（silence.mp3）")
+    }
+    
+    // 开始播放静默音频（在开始朗读前调用）
+    private func startSilentAudio() {
+        if silentAudioPlayer == nil {
+            setupSilentAudioPlayer()
+        }
+        
+        silentAudioPlayer?.play()
+        print("开始播放静默音频，帮助触发控制中心显示")
     }
 }
