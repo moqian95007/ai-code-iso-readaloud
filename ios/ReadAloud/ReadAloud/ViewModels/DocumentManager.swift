@@ -8,12 +8,12 @@ class DocumentManager: ObservableObject {
     static let supportedTypes: [UTType] = [
         .plainText,      // txt
         .pdf,            // pdf
-        .rtf,            // rtf
-        .epub,           // epub
-        UTType(filenameExtension: "mobi") ?? .data // mobi
+        .epub            // epub
     ]
     
     @Published var documentLibrary: DocumentLibraryManager
+    // 添加记录最后选择文件的属性
+    var lastSelectedFile: URL?
     
     init(documentLibrary: DocumentLibraryManager) {
         self.documentLibrary = documentLibrary
@@ -24,6 +24,13 @@ class DocumentManager: ObservableObject {
     func importDocument(url: URL) -> Bool {
         do {
             print("开始导入文档: \(url.lastPathComponent)")
+            
+            // 检查文件扩展名是否为支持的格式
+            let fileExtension = url.pathExtension.lowercased()
+            guard ["txt", "pdf", "epub"].contains(fileExtension) else {
+                print("不支持的文件格式: \(fileExtension)，仅支持txt、pdf和epub格式")
+                return false
+            }
             
             // 根据文件类型进行处理
             let fileType = try url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
@@ -46,46 +53,29 @@ class DocumentManager: ObservableObject {
                     content = try importPDFFile(url: url)
                     actualFileType = "pdf"
                     
-                case "public.rtf", "com.apple.rtf", "com.apple.rtfd":
-                    // RTF文件
-                    content = try importRTFFile(url: url)
-                    actualFileType = "rtf"
-                    
                 case "org.idpf.epub-container", "com.apple.ibooks.epub":
                     // EPUB文件
                     content = try importEPUBFile(url: url)
                     actualFileType = "epub"
                     
                 default:
-                    if type.contains("mobi") || url.pathExtension.lowercased() == "mobi" {
-                        // MOBI文件
-                        content = try importMOBIFile(url: url)
-                        actualFileType = "mobi"
-                    } else {
-                        // 基于文件扩展名尝试处理
-                        let fileExtension = url.pathExtension.lowercased()
-                        
-                        switch fileExtension {
-                        case "txt":
-                            content = try importTextFile(url: url)
-                            actualFileType = "txt"
-                        case "pdf":
-                            content = try importPDFFile(url: url)
-                            actualFileType = "pdf"
-                        case "rtf":
-                            content = try importRTFFile(url: url)
-                            actualFileType = "rtf"
-                        case "epub":
-                            content = try importEPUBFile(url: url)
-                            actualFileType = "epub"
-                        case "mobi":
-                            content = try importMOBIFile(url: url)
-                            actualFileType = "mobi"
-                        default:
-                            // 尝试作为文本文件处理
-                            content = try importTextFile(url: url)
-                            actualFileType = "txt"
-                        }
+                    // 基于文件扩展名尝试处理
+                    let fileExtension = url.pathExtension.lowercased()
+                    
+                    switch fileExtension {
+                    case "txt":
+                        content = try importTextFile(url: url)
+                        actualFileType = "txt"
+                    case "pdf":
+                        content = try importPDFFile(url: url)
+                        actualFileType = "pdf"
+                    case "epub":
+                        content = try importEPUBFile(url: url)
+                        actualFileType = "epub"
+                    default:
+                        // 尝试作为文本文件处理
+                        content = try importTextFile(url: url)
+                        actualFileType = "txt"
                     }
                 }
             } else {
@@ -99,15 +89,9 @@ class DocumentManager: ObservableObject {
                 case "pdf":
                     content = try importPDFFile(url: url)
                     actualFileType = "pdf"
-                case "rtf":
-                    content = try importRTFFile(url: url)
-                    actualFileType = "rtf"
                 case "epub":
                     content = try importEPUBFile(url: url)
                     actualFileType = "epub"
-                case "mobi":
-                    content = try importMOBIFile(url: url)
-                    actualFileType = "mobi"
                 default:
                     // 尝试作为文本文件处理
                     content = try importTextFile(url: url)
@@ -241,27 +225,6 @@ class DocumentManager: ObservableObject {
         return fullText
     }
     
-    // 导入RTF文件
-    private func importRTFFile(url: URL) throws -> String {
-        guard let data = try? Data(contentsOf: url) else {
-            throw NSError(domain: "DocumentManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法读取RTF文件数据"])
-        }
-        
-        // 尝试作为RTF解析
-        if let attributedString = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
-            print("成功解析RTF文件")
-            return attributedString.string
-        }
-        
-        // 尝试作为HTML解析
-        if let attributedString = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil) {
-            print("将RTF作为HTML解析成功")
-            return attributedString.string
-        }
-        
-        throw NSError(domain: "DocumentManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法解析RTF文件内容"])
-    }
-    
     // 导入EPUB文件
     private func importEPUBFile(url: URL) throws -> String {
         do {
@@ -281,29 +244,6 @@ class DocumentManager: ObservableObject {
             无法解析此EPUB文件: \(error.localizedDescription)
             
             请确保文件格式正确，或尝试将EPUB转换为TXT或PDF格式后再导入。
-            """
-        }
-    }
-    
-    // 导入MOBI文件
-    private func importMOBIFile(url: URL) throws -> String {
-        do {
-            // 使用新的MOBIParser解析MOBI文件
-            print("开始使用MOBIParser解析MOBI文件")
-            let content = try MOBIParser.parse(url: url)
-            return content
-        } catch {
-            print("MOBI解析错误: \(error.localizedDescription)")
-            
-            // 返回错误信息
-            return """
-            【MOBI文件导入错误】
-            
-            文件名: \(url.lastPathComponent)
-            
-            无法解析此MOBI文件: \(error.localizedDescription)
-            
-            请确保文件格式正确，或尝试将MOBI转换为EPUB、TXT或PDF格式后再导入。
             """
         }
     }
@@ -349,6 +289,17 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             
             print("选择的文档路径: \(url.path)")
             
+            // 记录用户选择的文件
+            parent.documentManager.lastSelectedFile = url
+            
+            // 检查文件扩展名是否支持
+            let fileExtension = url.pathExtension.lowercased()
+            guard ["txt", "pdf", "epub"].contains(fileExtension) else {
+                print("用户选择了不支持的文件格式: \(fileExtension)")
+                parent.completion(false)
+                return
+            }
+            
             // 获取文件的安全访问权限
             let success = url.startAccessingSecurityScopedResource()
             
@@ -361,6 +312,12 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             }
             
             print("文档导入结果: \(result ? "成功" : "失败")")
+            
+            // 如果导入成功，减少用户剩余导入次数
+            if result {
+                UserManager.shared.decreaseRemainingImportCount()
+            }
+            
             parent.completion(result)
         }
         

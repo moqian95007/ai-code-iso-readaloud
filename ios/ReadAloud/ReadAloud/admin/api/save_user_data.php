@@ -69,6 +69,40 @@ if ($result->num_rows !== 1) {
 
 $stmt->close();
 
+// 处理特殊字段：剩余导入数量
+if ($data_key === "remaining_import_count") {
+    // 验证数据值是否为有效整数
+    if (!is_numeric($data_value) || intval($data_value) < 0) {
+        echo json_encode([
+            'status' => 'error',
+            'message' => '导入数量必须是非负整数'
+        ]);
+        $conn->close();
+        exit;
+    }
+    
+    // 直接更新用户表中的字段
+    $remaining_count = intval($data_value);
+    $stmt = $conn->prepare("UPDATE users SET remaining_import_count = ? WHERE id = ?");
+    $stmt->bind_param("ii", $remaining_count, $user_id);
+    
+    if ($stmt->execute()) {
+        echo json_encode([
+            'status' => 'success',
+            'message' => '导入数量更新成功'
+        ]);
+    } else {
+        echo json_encode([
+            'status' => 'error',
+            'message' => '导入数量更新失败: ' . $conn->error
+        ]);
+    }
+    
+    $stmt->close();
+    $conn->close();
+    exit;
+}
+
 // 检查数据是否已存在
 $stmt = $conn->prepare("SELECT id FROM user_data WHERE user_id = ? AND data_key = ?");
 $stmt->bind_param("is", $user_id, $data_key);

@@ -50,6 +50,35 @@ if ($result->num_rows !== 1) {
 
 $stmt->close();
 
+// 特殊处理：获取剩余导入数量
+if ($data_key === "remaining_import_count") {
+    $stmt = $conn->prepare("SELECT remaining_import_count FROM users WHERE id = ?");
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($result->num_rows === 1) {
+        $row = $result->fetch_assoc();
+        $userData = [
+            "remaining_import_count" => (string)$row["remaining_import_count"]
+        ];
+        
+        echo json_encode([
+            'status' => 'success',
+            'data' => $userData
+        ]);
+    } else {
+        echo json_encode([
+            'status' => 'error',
+            'message' => '找不到用户数据'
+        ]);
+    }
+    
+    $stmt->close();
+    $conn->close();
+    exit;
+}
+
 // 获取用户数据
 if ($data_key) {
     // 获取特定键的数据

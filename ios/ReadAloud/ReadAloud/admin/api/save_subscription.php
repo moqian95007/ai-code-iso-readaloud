@@ -159,6 +159,12 @@ try {
         error_log("【save_subscription.php】处理订阅: ID=$id, 类型=$type, 用户ID=$sub_user_id, 活跃=$is_active");
         error_log("【save_subscription.php】转换后的日期: 开始=$start_date, 结束=$end_date, 创建=$created_at, 更新=$updated_at");
         
+        // 检测是否为恢复购买的订阅
+        if (strpos($subscription_id, 'restored_') === 0) {
+            error_log("【save_subscription.php】检测到恢复购买订阅: $subscription_id");
+            error_log("【save_subscription.php】恢复购买详情: 类型=$type, 开始日期=$start_date, 结束日期=$end_date");
+        }
+        
         // 检查记录是否存在
         $query = "SELECT 1 FROM user_subscriptions WHERE id = ?";
         $stmt = $conn->prepare($query);
@@ -189,7 +195,10 @@ try {
                 throw new Exception("准备更新语句失败: " . $conn->error);
             }
             
-            $stmt->bind_param("ssssis", $type, $start_date, $end_date, $subscription_id, $is_active, $updated_at, $id);
+            // 将is_active转换为字符串
+            $is_active_str = (string)$is_active;
+            
+            $stmt->bind_param("sssssss", $type, $start_date, $end_date, $subscription_id, $is_active_str, $updated_at, $id);
             $stmt->execute();
             
             if ($stmt->affected_rows > 0) {
@@ -214,19 +223,36 @@ try {
             
             error_log("【save_subscription.php】SQL绑定参数: id=$id, user_id=$sub_user_id, type=$type, start=$start_date, end=$end_date, subscription_id=$subscription_id, is_active=$is_active, created=$created_at, updated=$updated_at");
             
+            // 将所有参数转换为字符串形式，以避免类型错误
+            $id_str = $id;
+            $sub_user_id_str = (string)$sub_user_id; 
+            $is_active_str = (string)$is_active;
+            
             // 对每个参数进行检查
-            foreach ([$id, $sub_user_id, $type, $start_date, $end_date, $subscription_id, $is_active, $created_at, $updated_at] as $index => $param) {
+            foreach ([$id_str, $sub_user_id_str, $type, $start_date, $end_date, $subscription_id, $is_active_str, $created_at, $updated_at] as $index => $param) {
                 error_log("【save_subscription.php】参数 $index: " . (is_string($param) ? $param : gettype($param) . ":" . var_export($param, true)));
             }
             
             // 使用try-catch直接捕获绑定错误
             try {
-                $bind_result = $stmt->bind_param("sissssiss", $id, $sub_user_id, $type, $start_date, $end_date, $subscription_id, $is_active, $created_at, $updated_at);
+                // 使用全部字符串类型的绑定参数
+                $bind_result = $stmt->bind_param("sssssssss", 
+                    $id_str, 
+                    $sub_user_id_str, 
+                    $type, 
+                    $start_date, 
+                    $end_date, 
+                    $subscription_id, 
+                    $is_active_str, 
+                    $created_at, 
+                    $updated_at
+                );
+                
                 if (!$bind_result) {
                     throw new Exception("参数绑定失败: " . $stmt->error);
                 }
             } catch (Exception $e) {
-                throw new Exception("参数绑定异常: " . $e->getMessage() . ", 参数类型数量: 9, 绑定类型字符串: sissssiss");
+                throw new Exception("参数绑定异常: " . $e->getMessage() . ", 参数类型数量: 9, 绑定类型字符串: sssssssss");
             }
             
             // 使用try-catch直接捕获执行错误

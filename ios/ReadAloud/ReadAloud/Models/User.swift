@@ -51,6 +51,8 @@ struct User: Codable, Identifiable {
     var lastLogin: Date?
     /// 用户状态
     var status: String
+    /// 剩余可导入本地文档的数量
+    var remainingImportCount: Int = 1
     
     /// 用户令牌是否有效
     var isTokenValid: Bool {
@@ -70,5 +72,18 @@ struct User: Codable, Identifiable {
     /// 获取订阅结束日期
     var subscriptionEndDate: Date? {
         return SubscriptionRepository.shared.getActiveSubscription(for: id)?.endDate
+    }
+    
+    // CodingKeys枚举，处理字段命名差异
+    enum CodingKeys: String, CodingKey {
+        case id
+        case username
+        case email
+        case phone
+        case token
+        case registerDate = "register_date"
+        case lastLogin = "last_login"
+        case status
+        case remainingImportCount = "remaining_import_count"
     }
 } 

@@ -145,7 +145,7 @@ $login_type = 'email';
 $account_id = $email;
 
 // 插入用户数据
-$stmt = $conn->prepare("INSERT INTO users (username, password, email, account_id, login_type, register_date, last_login, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+$stmt = $conn->prepare("INSERT INTO users (username, password, email, account_id, login_type, register_date, last_login, status, remaining_import_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)");
 $stmt->bind_param("ssssssss", $username, $password_hash, $email, $account_id, $login_type, $currentTime, $currentTime, $status);
 
 if ($stmt->execute()) {

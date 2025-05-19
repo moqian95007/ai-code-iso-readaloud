@@ -34,7 +34,7 @@ class NetworkManager {
         // 使用表单数据格式而不是JSON
         let parameters = ["email": email]
         return requestWithFormData(endpoint: "/send_verification_code.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<String>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<String>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -77,7 +77,7 @@ class NetworkManager {
         // 使用email参数发送邮箱
         let parameters = ["email": email, "password": password]
         return request(endpoint: "/login.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<User>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -127,7 +127,7 @@ class NetworkManager {
         ]
         
         return request(endpoint: "/register.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<User>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -178,7 +178,7 @@ class NetworkManager {
         }
         
         return request(endpoint: "/get_user_data.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<[String: String]>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<[String: String]>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -219,7 +219,7 @@ class NetworkManager {
         ]
         
         return request(endpoint: "/save_user_data.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<String>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<String>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -263,7 +263,7 @@ class NetworkManager {
         ]
         
         return request(endpoint: "/verify_code.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<VerificationResponse>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<VerificationResponse>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -311,7 +311,7 @@ class NetworkManager {
         ]
         
         return request(endpoint: "/register.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<User>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -366,7 +366,7 @@ class NetworkManager {
         print("发送Apple登录请求 - 参数: \(parameters)")
         
         return request(endpoint: "/third_party_login.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<User>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -417,7 +417,7 @@ class NetworkManager {
         print("发送Google登录请求 - 参数: \(parameters)")
         
         return request(endpoint: "/third_party_login.php", method: "POST", parameters: parameters)
-            .decode(type: APIResponse<User>.self, decoder: JSONDecoder())
+            .decode(type: APIResponse<User>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
                     print("解码错误: \(decodingError)")
@@ -657,6 +657,15 @@ class NetworkManager {
                 return .networkError(error)
             }
             .eraseToAnyPublisher()
+    }
+    
+    // 创建一个配置好日期格式的解码器
+    private func createDateFormattedDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        decoder.dateDecodingStrategy = .formatted(dateFormatter)
+        return decoder
     }
 }
 

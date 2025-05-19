@@ -63,21 +63,8 @@ class UserManager: ObservableObject {
                             print("Apple登录错误: \(error)")
                         }
                         
-                        // 登录失败时，仍然创建本地用户对象（离线模式）
-                        print("使用本地模式创建Apple用户")
-                        let offlineUser = User(
-                            id: -1, // 使用临时ID
-                            username: username,
-                            email: email,
-                            phone: nil,
-                            token: "local_token_for_apple",
-                            registerDate: Date(),
-                            lastLogin: Date(),
-                            status: "active"
-                        )
-                        self?.currentUser = offlineUser
-                        self?.isLoggedIn = true
-                        self?.saveUserToStorage(user: offlineUser)
+                        // 登录失败时保持未登录状态
+                        print("Apple登录失败，保持未登录状态")
                     }
                 },
                 receiveValue: { [weak self] user in
@@ -130,21 +117,8 @@ class UserManager: ObservableObject {
                             print("Google登录错误: \(error)")
                         }
                         
-                        // 登录失败时，仍然创建本地用户对象（离线模式）
-                        print("使用本地模式创建Google用户")
-                        let offlineUser = User(
-                            id: -2, // 使用临时ID
-                            username: username,
-                            email: userEmail,
-                            phone: nil,
-                            token: "local_token_for_google",
-                            registerDate: Date(),
-                            lastLogin: Date(),
-                            status: "active"
-                        )
-                        self?.currentUser = offlineUser
-                        self?.isLoggedIn = true
-                        self?.saveUserToStorage(user: offlineUser)
+                        // 登录失败时保持未登录状态
+                        print("Google登录失败，保持未登录状态")
                     }
                 },
                 receiveValue: { [weak self] user in
@@ -669,6 +643,14 @@ class UserManager: ObservableObject {
         // 3. 同步文章数据
         syncGroup.enter()
         syncRemoteArticlesToLocal(userId: user.id, token: token) {
+            syncGroup.leave()
+        }
+        
+        // 4. 同步导入文档数量
+        syncGroup.enter()
+        syncRemoteImportCountToLocal(user: user)
+        // 由于syncRemoteImportCountToLocal是异步操作，我们需要等待一段时间再离开组
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             syncGroup.leave()
         }
         
@@ -1281,6 +1263,137 @@ class UserManager: ObservableObject {
         if isLoggedIn, let token = user.token, !token.isEmpty, user.id > 0 {
             // 在实际应用中，这里应该将用户信息同步到服务器
             print("更新用户信息并同步到服务器: \(user.username)")
+        }
+    }
+    
+    // MARK: - 文档导入限制
+    
+    /// 减少用户剩余导入数量
+    /// - Returns: 操作是否成功
+    func decreaseRemainingImportCount() -> Bool {
+        guard var user = currentUser else { return false }
+        
+        // 如果用户有订阅，不减少导入数量
+        if user.hasActiveSubscription {
+            return true
+        }
+        
+        // 如果剩余导入数为0，则不能再减少
+        if user.remainingImportCount <= 0 {
+            return false
+        }
+        
+        // 减少导入数量
+        user.remainingImportCount -= 1
+        
+        // 更新用户数据
+        currentUser = user
+        saveUserToStorage(user: user)
+        
+        // 如果用户已登录，同步数据到远程
+        if user.isTokenValid && user.id > 0 {
+            syncRemainingImportCount(user: user)
+        }
+        
+        return true
+    }
+    
+    /// 将导入数量同步到远程
+    /// - Parameter user: 用户对象
+    private func syncRemainingImportCount(user: User) {
+        guard user.isTokenValid && user.id > 0, let token = user.token else { return }
+        
+        // 将数据转换为JSON
+        let dataValue = String(user.remainingImportCount)
+        
+        // 使用NetworkManager保存数据
+        NetworkManager.shared.saveUserData(userId: user.id, token: token, dataKey: "remaining_import_count", dataValue: dataValue)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { result in
+                    if case .failure(let error) = result {
+                        print("同步导入数量失败: \(error)")
+                    }
+                },
+                receiveValue: { message in
+                    print("同步导入数量成功: \(message)")
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    /// 从远程同步用户导入数量
+    /// - Parameter user: 用户对象
+    func syncRemoteImportCountToLocal(user: User) {
+        guard user.isTokenValid && user.id > 0, let token = user.token else { return }
+        
+        // 获取远程保存的导入数量
+        NetworkManager.shared.getUserData(userId: user.id, token: token, dataKey: "remaining_import_count")
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { completionStatus in
+                    if case .failure(let error) = completionStatus {
+                        print("从远程获取导入数量失败: \(error)")
+                    }
+                },
+                receiveValue: { [weak self] responseData in
+                    // 检查是否获取到数据
+                    if let countString = responseData["remaining_import_count"], let count = Int(countString) {
+                        // 更新当前用户
+                        if var currentUser = self?.currentUser {
+                            currentUser.remainingImportCount = count
+                            self?.currentUser = currentUser
+                            self?.saveUserToStorage(user: currentUser)
+                            print("成功从远程同步导入数量: \(count)")
+                        }
+                    }
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    // MARK: - 用户状态刷新
+    
+    /// 刷新用户状态（订阅状态和剩余导入数量）
+    /// - Parameter completion: 完成回调
+    func refreshUserStatus(completion: (() -> Void)? = nil) {
+        guard isLoggedIn, let user = currentUser, user.isTokenValid else {
+            print("刷新用户状态失败: 用户未登录或令牌无效")
+            completion?()
+            return
+        }
+        
+        print("开始刷新用户状态 - 用户ID: \(user.id)")
+        
+        // 创建一个组来追踪所有同步任务
+        let syncGroup = DispatchGroup()
+        
+        // 1. 同步订阅状态
+        syncGroup.enter()
+        DispatchQueue.main.async {
+            SubscriptionRepository.shared.loadSubscriptionsForUser(user.id)
+            // 由于loadSubscriptionsForUser是异步操作，给它一点时间完成
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                syncGroup.leave()
+            }
+        }
+        
+        // 2. 同步剩余导入数量
+        syncGroup.enter()
+        self.syncRemoteImportCountToLocal(user: user)
+        // 由于syncRemoteImportCountToLocal是异步操作，给它一点时间完成
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            syncGroup.leave()
+        }
+        
+        // 当所有任务完成后发送通知
+        syncGroup.notify(queue: .main) {
+            print("用户状态刷新完成")
+            
+            // 发送通知以更新界面显示
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            
+            completion?()
         }
     }
 } 

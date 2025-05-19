@@ -41,7 +41,7 @@ $password = trim($data['password']);
 $conn = connectDB();
 
 // 只通过邮箱查询用户
-$stmt = $conn->prepare("SELECT id, username, email, account_id, login_type, password, status FROM users WHERE email = ? AND login_type = 'email'");
+$stmt = $conn->prepare("SELECT id, username, email, account_id, login_type, password, status, remaining_import_count FROM users WHERE email = ? AND login_type = 'email'");
 $stmt->bind_param("s", $email);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -103,7 +103,8 @@ $userData = [
     'email' => $user['email'],
     'token' => $token,
     'last_login' => $currentTime,
-    'status' => $user['status']
+    'status' => $user['status'],
+    'remaining_import_count' => $user['remaining_import_count']
 ];
 
 $conn->close();

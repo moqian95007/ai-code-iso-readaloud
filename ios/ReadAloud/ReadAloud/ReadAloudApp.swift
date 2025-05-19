@@ -27,6 +27,9 @@ struct ReadAloudApp: App {
     // 添加PlaybackManager实例，用于全局播放状态管理
     @ObservedObject private var playbackManager = PlaybackManager.shared
     
+    // 添加UserManager实例，用于管理用户状态
+    @ObservedObject private var userManager = UserManager.shared
+    
     // 添加 ArticleManager 实例
     @StateObject private var articleManager = ArticleManager()
     
@@ -46,6 +49,9 @@ struct ReadAloudApp: App {
         
         // 初始化订阅服务
         _ = SubscriptionService.shared
+        
+        // 应用启动时同步用户状态
+        syncUserStatusOnLaunch()
     }
     
     // 设置后台音频会话
@@ -55,6 +61,34 @@ struct ReadAloudApp: App {
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("设置后台音频会话失败: \(error.localizedDescription)")
+        }
+    }
+    
+    // 应用启动时同步用户状态
+    private func syncUserStatusOnLaunch() {
+        // 检查用户是否已登录
+        if userManager.isLoggedIn, let user = userManager.currentUser, user.isTokenValid {
+            print("应用启动: 用户已登录，同步用户状态")
+            
+            // 创建同步队列
+            let syncQueue = DispatchQueue(label: "com.readaloud.syncQueue", qos: .utility)
+            
+            // 异步执行同步操作
+            syncQueue.async {
+                // 1. 同步订阅状态
+                SubscriptionRepository.shared.loadSubscriptionsForUser(user.id)
+                
+                // 2. 同步剩余导入数量
+                self.userManager.syncRemoteImportCountToLocal(user: user)
+                
+                // 完成同步后发送通知，更新UI
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                    print("应用启动: 用户状态同步完成")
+                }
+            }
+        } else {
+            print("应用启动: 用户未登录，跳过同步")
         }
     }
     

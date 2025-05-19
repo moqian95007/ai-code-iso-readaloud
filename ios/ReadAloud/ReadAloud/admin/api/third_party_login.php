@@ -45,7 +45,7 @@ if ($login_type === 'apple') {
     $id_token = isset($data['id_token']) ? cleanInput($data['id_token']) : '';
     
     // 查找是否已存在此account_id的Apple用户
-    $stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status FROM users WHERE account_id = ? AND login_type = 'apple'");
+    $stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status, remaining_import_count FROM users WHERE account_id = ? AND login_type = 'apple'");
     $stmt->bind_param("s", $account_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -100,7 +100,7 @@ if ($login_type === 'apple') {
         $hashed_password = password_hash($random_password, PASSWORD_DEFAULT);
 
         // 插入新用户
-        $insert_stmt = $conn->prepare("INSERT INTO users (username, email, account_id, login_type, apple_id, password, register_date, last_login, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $insert_stmt = $conn->prepare("INSERT INTO users (username, email, account_id, login_type, apple_id, password, register_date, last_login, status, remaining_import_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
         $insert_stmt->bind_param("sssssssss", $username, $email, $account_id, $login_type_value, $account_id, $hashed_password, $current_time, $current_time, $status);
         
         if ($insert_stmt->execute()) {
@@ -124,7 +124,8 @@ if ($login_type === 'apple') {
                 'register_date' => $current_time,
                 'last_login' => $current_time,
                 'status' => 'active',
-                'token' => $token
+                'token' => $token,
+                'remaining_import_count' => 1
             ];
             
             echo json_encode(['status' => 'success', 'message' => '注册成功', 'data' => $new_user]);
@@ -147,7 +148,7 @@ if ($login_type === 'apple') {
     $account_id = $google_token;
     
     // 查找是否已存在此account_id的Google用户
-    $stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status FROM users WHERE account_id = ? AND login_type = 'google'");
+    $stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status, remaining_import_count FROM users WHERE account_id = ? AND login_type = 'google'");
     $stmt->bind_param("s", $account_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -203,7 +204,7 @@ if ($login_type === 'apple') {
         $hashed_password = password_hash($random_password, PASSWORD_DEFAULT);
 
         // 插入新用户
-        $insert_stmt = $conn->prepare("INSERT INTO users (username, email, account_id, login_type, google_id, password, register_date, last_login, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $insert_stmt = $conn->prepare("INSERT INTO users (username, email, account_id, login_type, google_id, password, register_date, last_login, status, remaining_import_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
         $insert_stmt->bind_param("sssssssss", $username, $email, $account_id, $login_type_value, $account_id, $hashed_password, $current_time, $current_time, $status);
         
         if ($insert_stmt->execute()) {
@@ -227,7 +228,8 @@ if ($login_type === 'apple') {
                 'register_date' => $current_time,
                 'last_login' => $current_time,
                 'status' => 'active',
-                'token' => $token
+                'token' => $token,
+                'remaining_import_count' => 1
             ];
             
             echo json_encode(['status' => 'success', 'message' => '注册成功', 'data' => $new_user]);

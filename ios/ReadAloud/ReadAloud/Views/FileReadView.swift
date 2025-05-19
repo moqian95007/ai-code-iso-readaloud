@@ -16,6 +16,7 @@ struct FileReadView: View {
     @State private var selectedDocument: Document? = nil // 选择的文档
     @State private var showDocumentReader = false // 是否显示阅读器
     @State private var isImporting = false // 添加导入中状态
+    @State private var showFormatError = false // 添加格式错误状态
     
     // 必要的管理器
     @ObservedObject private var articleManager: ArticleManager // 移除单例引用
@@ -44,7 +45,11 @@ struct FileReadView: View {
                         VStack(spacing: 20) {
                             // 本地文件导入按钮
                             if !isEditMode {
-                                ImportButton(showImportPicker: $showImportPicker, isImporting: $isImporting)
+                                ImportButton(
+                                    showImportPicker: $showImportPicker, 
+                                    isImporting: $isImporting,
+                                    showFormatError: $showFormatError
+                                )
                             }
                             
                             // 文档列表区域
@@ -170,9 +175,16 @@ struct FileReadView: View {
                             print("已触发文档库加载完成通知")
                         }
                     } else {
-                        // 导入失败，显示错误消息
-                        errorMessage = "导入文档失败，请检查文件格式或权限"
-                        showImportError = true
+                        // 检查是否是格式错误
+                        if let url = documentManager.lastSelectedFile,
+                           !["txt", "pdf", "epub"].contains(url.pathExtension.lowercased()) {
+                            // 显示格式错误提示
+                            showFormatError = true
+                        } else {
+                            // 导入失败，显示错误消息
+                            errorMessage = "导入文档失败，请检查文件格式或权限"
+                            showImportError = true
+                        }
                     }
                 }
             }
@@ -325,10 +337,35 @@ struct HeaderView: View {
 struct ImportButton: View {
     @Binding var showImportPicker: Bool
     @Binding var isImporting: Bool  // 添加导入状态绑定
+    @Binding var showFormatError: Bool
+    
+    @State private var showLoginAlert = false
+    @State private var showSubscriptionAlert = false
+    @State private var showLoginView = false  // 添加登录视图状态
+    @State private var showSubscriptionView = false  // 添加订阅视图状态
+    
+    // 获取UserManager实例
+    @ObservedObject private var userManager = UserManager.shared
     
     var body: some View {
         Button(action: {
             print("点击了导入按钮")
+            
+            // 检查用户是否登录
+            if !userManager.isLoggedIn {
+                // 用户未登录，显示登录提示
+                showLoginAlert = true
+                return
+            }
+            
+            // 检查用户是否有导入权限
+            if let user = userManager.currentUser, user.remainingImportCount <= 0 && !user.hasActiveSubscription {
+                // 用户剩余导入次数为0且没有订阅会员，显示订阅提示
+                showSubscriptionAlert = true
+                return
+            }
+            
+            // 用户已登录且有导入权限，显示导入界面
             // 立即显示导入中遮罩
             withAnimation {
                 isImporting = true
@@ -345,6 +382,9 @@ struct ImportButton: View {
                 Text("导入本地文档")
                     .font(.system(size: 16))
                     .foregroundColor(.gray)
+                Text("(仅支持txt、pdf和epub格式)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray.opacity(0.8))
                 Spacer()
             }
             .frame(height: 200)
@@ -356,6 +396,33 @@ struct ImportButton: View {
                     .cornerRadius(10)
             )
             .padding(.horizontal)
+        }
+        .alert("需要登录", isPresented: $showLoginAlert) {
+            Button("取消", role: .cancel) {}
+            Button("去登录") {
+                showLoginView = true  // 直接显示登录视图
+            }
+        } message: {
+            Text("您需要登录后才能导入本地文档")
+        }
+        .alert("导入次数已用完", isPresented: $showSubscriptionAlert) {
+            Button("取消", role: .cancel) {}
+            Button("订阅会员") {
+                showSubscriptionView = true  // 直接显示订阅视图
+            }
+        } message: {
+            Text("您的免费导入次数已用完，订阅会员后可无限导入本地文档")
+        }
+        .sheet(isPresented: $showLoginView) {
+            LoginView(isPresented: $showLoginView)
+        }
+        .sheet(isPresented: $showSubscriptionView) {
+            SubscriptionView(isPresented: $showSubscriptionView)
+        }
+        .alert("格式不支持", isPresented: $showFormatError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text("仅支持导入txt、pdf和epub格式的文档")
         }
     }
 }

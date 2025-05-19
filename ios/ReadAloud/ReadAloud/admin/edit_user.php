@@ -22,9 +22,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = cleanInput($_POST['email']);
     $phone = cleanInput($_POST['phone']);
     $status = cleanInput($_POST['status']);
+    $remainingImportCount = max(0, intval($_POST['remaining_import_count'])); // 确保值不小于0
     
-    $stmt = $conn->prepare("UPDATE users SET username = ?, email = ?, phone = ?, status = ? WHERE id = ?");
-    $stmt->bind_param("ssssi", $username, $email, $phone, $status, $userId);
+    $stmt = $conn->prepare("UPDATE users SET username = ?, email = ?, phone = ?, status = ?, remaining_import_count = ? WHERE id = ?");
+    $stmt->bind_param("ssssis", $username, $email, $phone, $status, $remainingImportCount, $userId);
     
     if ($stmt->execute()) {
         $message = '用户信息已更新';
@@ -35,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // 获取用户信息
-$stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status FROM users WHERE id = ?");
+$stmt = $conn->prepare("SELECT id, username, email, phone, register_date, last_login, status, remaining_import_count FROM users WHERE id = ?");
 $stmt->bind_param("i", $userId);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -248,6 +249,11 @@ $conn->close();
                         <div class="form-group">
                             <label>最后登录</label>
                             <input type="text" value="<?php echo $user['last_login']; ?>" readonly>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>剩余导入数量</label>
+                            <input type="text" id="remaining_import_count" name="remaining_import_count" value="<?php echo htmlspecialchars($user['remaining_import_count']); ?>">
                         </div>
                         
                         <div class="form-group">

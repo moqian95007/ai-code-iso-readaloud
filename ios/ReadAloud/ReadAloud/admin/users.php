@@ -25,9 +25,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $stmt->close();
 }
 
+// 处理剩余导入数量更新
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_import_count') {
+    $userId = (int)$_POST['user_id'];
+    $importCount = (int)$_POST['remaining_import_count'];
+    
+    // 确保数量不为负数
+    if ($importCount < 0) {
+        $importCount = 0;
+    }
+    
+    $stmt = $conn->prepare("UPDATE users SET remaining_import_count = ? WHERE id = ?");
+    $stmt->bind_param("ii", $importCount, $userId);
+    
+    if ($stmt->execute()) {
+        $message = '用户剩余导入数量已更新';
+    } else {
+        $message = '更新失败: ' . $conn->error;
+    }
+    $stmt->close();
+}
+
 // 获取所有用户
 $users = [];
-$result = $conn->query("SELECT id, username, email, phone, register_date, last_login, status FROM users ORDER BY register_date DESC");
+$result = $conn->query("SELECT id, username, email, phone, register_date, last_login, status, remaining_import_count FROM users ORDER BY register_date DESC");
 
 if ($result) {
     while ($row = $result->fetch_assoc()) {
@@ -205,13 +226,14 @@ $conn->close();
                             <th>注册日期</th>
                             <th>最后登录</th>
                             <th>状态</th>
+                            <th>剩余导入次数</th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($users)): ?>
                             <tr>
-                                <td colspan="8" style="text-align: center;">没有找到用户</td>
+                                <td colspan="9" style="text-align: center;">没有找到用户</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($users as $user): ?>
@@ -230,6 +252,14 @@ $conn->close();
                                                 <option value="active" <?php echo $user['status'] === 'active' ? 'selected' : ''; ?>>激活</option>
                                                 <option value="inactive" <?php echo $user['status'] === 'inactive' ? 'selected' : ''; ?>>禁用</option>
                                             </select>
+                                            <button type="submit">更新</button>
+                                        </form>
+                                    </td>
+                                    <td>
+                                        <form method="post" action="" style="display:inline;">
+                                            <input type="hidden" name="action" value="update_import_count">
+                                            <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
+                                            <input type="number" name="remaining_import_count" value="<?php echo isset($user['remaining_import_count']) ? (int)$user['remaining_import_count'] : 1; ?>" min="0" style="width: 60px;">
                                             <button type="submit">更新</button>
                                         </form>
                                     </td>

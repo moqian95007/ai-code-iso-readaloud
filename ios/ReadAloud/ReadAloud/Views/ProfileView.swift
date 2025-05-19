@@ -39,21 +39,33 @@ struct ProfileView: View {
                                 .foregroundColor(.gray)
                         }
                         
-                        // 显示会员状态
-                        if user.hasActiveSubscription {
-                            HStack {
-                                Image(systemName: "crown.fill")
-                                    .foregroundColor(.yellow)
-                                Text("PRO会员")
-                                    .foregroundColor(.orange)
-                                    .font(.system(size: 14, weight: .medium))
+                        // 显示会员状态和剩余导入次数
+                        VStack(spacing: 8) {
+                            // 如果是PRO会员，显示会员标签
+                            if user.hasActiveSubscription {
+                                HStack {
+                                    Image(systemName: "crown.fill")
+                                        .foregroundColor(.yellow)
+                                    Text("PRO会员")
+                                        .foregroundColor(.orange)
+                                        .font(.system(size: 14, weight: .medium))
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 12)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(15)
                             }
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 12)
-                            .background(Color(UIColor.systemGray6))
-                            .cornerRadius(15)
-                            .padding(.top, 5)
+                            
+                            // 所有用户都显示剩余导入次数
+                            Text("剩余导入\(user.remainingImportCount)次")
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 12)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(15)
                         }
+                        .padding(.top, 5)
                     }
                     .padding(.bottom, 10)
                 } else {
