@@ -42,7 +42,7 @@ struct VoiceSelectorView: View {
                 if voices.isEmpty {
                     // 显示加载中或者没有语音的提示
                     VStack {
-                        Text("正在加载语音...")
+                        Text("loading_voices".localized)
                         ProgressView()
                     }
                 } else if let selectedLanguage = selectedLanguage, 
@@ -59,7 +59,7 @@ struct VoiceSelectorView: View {
                                     UserDefaults.standard.set(selectedVoiceIdentifier, forKey: UserDefaultsKeys.selectedVoiceIdentifier)
                                     showVoiceSelector = false
                                 } else {
-                                    errorMessage = "请选择与文章语言相匹配的主播"
+                                    errorMessage = "select_matching_voice".localized
                                     showErrorAlert = true
                                 }
                             }) {
@@ -85,7 +85,7 @@ struct VoiceSelectorView: View {
                     }
                     .navigationTitle(selectedLanguage)
                     .navigationBarItems(
-                        leading: Button("返回") {
+                        leading: Button("back".localized) {
                             self.selectedLanguage = nil
                         }
                     )
@@ -100,7 +100,7 @@ struct VoiceSelectorView: View {
                                     VStack(alignment: .leading) {
                                         Text(language)
                                             .font(.headline)
-                                        Text("\(voices.count) 个主播")
+                                        Text("voice_count".localized(with: voices.count))
                                             .font(.caption)
                                             .foregroundColor(.gray)
                                     }
@@ -114,17 +114,17 @@ struct VoiceSelectorView: View {
                             .foregroundColor(.primary)
                         }
                     }
-                    .navigationTitle("选择语言")
+                    .navigationTitle("select_language".localized)
                     .navigationBarItems(
-                        trailing: Button("取消") {
+                        trailing: Button("cancel".localized) {
                             showVoiceSelector = false
                         }
                     )
                 }
             }
         }
-        .alert("提示", isPresented: $showErrorAlert) {
-            Button("确定", role: .cancel) { }
+        .alert("alert_title".localized, isPresented: $showErrorAlert) {
+            Button("ok".localized, role: .cancel) { }
         } message: {
             Text(errorMessage)
         }

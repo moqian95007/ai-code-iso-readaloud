@@ -5,9 +5,9 @@ import Combine
 
 /// 播放模式枚举
 enum PlaybackMode: String, CaseIterable {
-    case singlePlay = "单篇播放"  // 播放完当前文章后停止
-    case singleRepeat = "单篇循环"  // 循环播放当前文章
-    case listRepeat = "列表循环"  // 循环播放列表中的文章
+    case singlePlay = "single_play"  // 播放完当前文章后停止
+    case singleRepeat = "single_repeat"  // 循环播放当前文章
+    case listRepeat = "list_repeat"  // 循环播放列表中的文章
     
     var iconName: String {
         switch self {

@@ -11,7 +11,7 @@ struct TimerSheetView: View {
     var body: some View {
         VStack(spacing: 0) {
             // 标题
-            Text("定时关闭")
+            Text("timer_shutdown".localized)
                 .font(.system(size: 18, weight: .bold))
                 .padding(.vertical, 12)
             
@@ -20,12 +20,12 @@ struct TimerSheetView: View {
             if showCustomView {
                 // 自定义时间设置界面
                 VStack(spacing: 16) {
-                    Text("请输入分钟数 (1-120)")
+                    Text("enter_minutes".localized)
                         .font(.system(size: 16))
                         .padding(.top, 20)
                     
                     // 自定义分钟数输入框
-                    TextField("分钟", text: $customMinutes)
+                    TextField("minutes".localized, text: $customMinutes)
                         .keyboardType(.numberPad)
                         .font(.system(size: 18))
                         .multilineTextAlignment(.center)
@@ -39,7 +39,7 @@ struct TimerSheetView: View {
                     // 按钮组
                     HStack(spacing: 16) {
                         // 取消按钮
-                        Button("取消") {
+                        Button("cancel".localized) {
                             showCustomView = false
                         }
                         .frame(width: 100)
@@ -48,7 +48,7 @@ struct TimerSheetView: View {
                         .cornerRadius(8)
                         
                         // 确定按钮
-                        Button("确定") {
+                        Button("confirm".localized) {
                             // 处理自定义分钟数
                             if let minutes = Int(customMinutes), minutes > 0, minutes <= 120 {
                                 timerManager.setTimer(option: .custom, customValue: minutes)
@@ -71,7 +71,7 @@ struct TimerSheetView: View {
                     VStack(spacing: 0) {
                         // 不开启选项
                         RadioButtonRow(
-                            title: TimerOption.off.rawValue,
+                            title: TimerOption.off.rawValue.localized,
                             isSelected: timerManager.selectedOption == .off,
                             action: {
                                 timerManager.setTimer(option: .off)
@@ -81,7 +81,7 @@ struct TimerSheetView: View {
                         
                         // 播完本章选项
                         RadioButtonRow(
-                            title: TimerOption.afterChapter.rawValue,
+                            title: TimerOption.afterChapter.rawValue.localized,
                             isSelected: timerManager.selectedOption == .afterChapter,
                             action: {
                                 timerManager.setTimer(option: .afterChapter)
@@ -91,7 +91,7 @@ struct TimerSheetView: View {
                         
                         // 10分钟后选项
                         RadioButtonRow(
-                            title: TimerOption.after10Min.rawValue,
+                            title: TimerOption.after10Min.rawValue.localized,
                             isSelected: timerManager.selectedOption == .after10Min,
                             action: {
                                 timerManager.setTimer(option: .after10Min)
@@ -101,7 +101,7 @@ struct TimerSheetView: View {
                         
                         // 20分钟后选项
                         RadioButtonRow(
-                            title: TimerOption.after20Min.rawValue,
+                            title: TimerOption.after20Min.rawValue.localized,
                             isSelected: timerManager.selectedOption == .after20Min,
                             action: {
                                 timerManager.setTimer(option: .after20Min)
@@ -111,7 +111,7 @@ struct TimerSheetView: View {
                         
                         // 30分钟后选项
                         RadioButtonRow(
-                            title: TimerOption.after30Min.rawValue,
+                            title: TimerOption.after30Min.rawValue.localized,
                             isSelected: timerManager.selectedOption == .after30Min,
                             action: {
                                 timerManager.setTimer(option: .after30Min)
@@ -121,7 +121,7 @@ struct TimerSheetView: View {
                         
                         // 60分钟后选项
                         RadioButtonRow(
-                            title: TimerOption.after60Min.rawValue,
+                            title: TimerOption.after60Min.rawValue.localized,
                             isSelected: timerManager.selectedOption == .after60Min,
                             action: {
                                 timerManager.setTimer(option: .after60Min)
@@ -131,7 +131,7 @@ struct TimerSheetView: View {
                         
                         // 90分钟后选项
                         RadioButtonRow(
-                            title: TimerOption.after90Min.rawValue,
+                            title: TimerOption.after90Min.rawValue.localized,
                             isSelected: timerManager.selectedOption == .after90Min,
                             action: {
                                 timerManager.setTimer(option: .after90Min)
@@ -141,7 +141,7 @@ struct TimerSheetView: View {
                         
                         // 自定义选项
                         RadioButtonRow(
-                            title: TimerOption.custom.rawValue,
+                            title: TimerOption.custom.rawValue.localized,
                             isSelected: timerManager.selectedOption == .custom,
                             action: {
                                 // 显示自定义界面
@@ -156,7 +156,7 @@ struct TimerSheetView: View {
                 Button(action: {
                     isPresented = false
                 }) {
-                    Text("关闭")
+                    Text("close".localized)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 15)
                         .foregroundColor(themeManager.isDarkMode ? .white : .blue)

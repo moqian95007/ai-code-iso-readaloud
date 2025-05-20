@@ -1,0 +1,170 @@
+/* Main Tab View */
+"tab_home" = "首页";
+"tab_list" = "列表";
+"tab_profile" = "我的";
+
+/* File Read View */
+"no_documents" = "尚未导入任何文档";
+"import_document" = "导入文档";
+"import_in_progress" = "文档导入中...";
+"please_wait" = "请稍候，正在处理文件";
+"import_success" = "导入成功";
+"import_success_message" = "文档已成功导入并转换为可朗读的文本。章节识别正在后台进行中，识别完成前文档暂不可点击。";
+"import_failed" = "导入失败";
+"manage" = "管理";
+"done" = "完成";
+"format_not_supported" = "格式不支持";
+"format_error_message" = "仅支持导入txt、pdf和epub格式的文档";
+"supported_formats" = "(仅支持txt、pdf和epub格式)";
+"tap_to_start" = "点击开始朗读";
+"played_percentage" = "已播放%d%%";
+"cannot_load_document" = "无法加载文档";
+"document_empty_or_invalid" = "文档内容为空或未正确加载 (%@)";
+"document_invalid" = "文档选择无效";
+"document_empty" = "文档内容为空";
+"loading_chapters" = "加载章节中...";
+
+/* Profile View */
+"login_register" = "登录/注册";
+"pro_member" = "PRO会员";
+"remaining_imports" = "剩余导入%d次";
+"subscription" = "会员订阅";
+"buy_imports" = "购买导入次数";
+"personal_info" = "个人信息";
+"settings" = "设置";
+"favorites" = "我的收藏";
+"download_management" = "下载管理";
+"dark_mode" = "深色模式";
+"help_feedback" = "帮助与反馈";
+"about_us" = "关于我们";
+"logout" = "退出登录";
+"login_required" = "需要登录";
+"login_required_message" = "请先登录以访问此功能";
+"login" = "登录";
+"cancel" = "取消";
+
+/* Language Settings */
+"language" = "语言";
+"language_settings" = "语言设置";
+"follow_system" = "跟随系统";
+"chinese" = "中文";
+"english" = "英文";
+"language_changed" = "语言已更改";
+"language_restart_message" = "语言设置已更改。部分变更可能需要重启应用才能完全生效。";
+
+/* Article List View */
+"manage" = "管理";
+"done" = "完成";
+"add_list" = "新增列表";
+"edit_list" = "编辑列表";
+"reading_list" = "阅读列表";
+"articles_count" = "%@ · %d篇文章";
+"play_all" = "播放全部";
+"no_articles_in_list" = "%@中没有文章";
+"tap_to_add_article" = "点击右上角的+按钮添加新文章";
+"confirm_delete" = "确认删除";
+"cancel" = "取消";
+"delete" = "删除";
+"confirm_delete_message" = "确定要删除文章\"%@\"吗？此操作无法撤销。";
+"date_format" = "yyyy年MM月dd日";
+
+/* Article Reader View */
+"start_from_beginning" = "从头开始";
+"article_list" = "列表";
+"chapter" = "章";
+"after_chapter" = "本章后";
+"timer" = "定时";
+"voice" = "主播";
+"select_voice_prompt" = "请选择%@主播朗读%@文章";
+"night_mode" = "夜间";
+"day_mode" = "日间";
+"font_size_small" = "小";
+"font_size_medium" = "中";
+"font_size_large" = "大";
+"font_size_extra_large" = "特大";
+
+/* Playback Mode */
+"single_play" = "单篇播放";
+"single_repeat" = "单篇循环";
+"list_repeat" = "列表循环";
+
+/* Article List Popover */
+"article_list_count" = "文章列表（共%d篇）";
+"close" = "关闭";
+
+/* Timer Sheet */
+"timer_shutdown" = "定时关闭";
+"enter_minutes" = "请输入分钟数 (1-120)";
+"minutes" = "分钟";
+"confirm" = "确定";
+"timer_off" = "不开启";
+"timer_after_chapter" = "播完本章";
+"timer_10min" = "10分钟后";
+"timer_20min" = "20分钟后";
+"timer_30min" = "30分钟后";
+"timer_60min" = "60分钟后";
+"timer_90min" = "90分钟后";
+"timer_custom" = "自定义";
+
+/* Voice Selector */
+"loading_voices" = "正在加载语音...";
+"select_matching_voice" = "请选择与文章语言相匹配的主播";
+"voice_count" = "%d 个主播";
+"select_language" = "选择语言";
+"back" = "返回";
+"alert_title" = "提示";
+"ok" = "确定";
+
+/* Speed Selector */
+"adjust_speed" = "调语速"; 
+
+/* Language Settings */
+"follow_system" = "跟随系统";
+
+/* Subscription */
+"subscribe_pro" = "订阅PRO会员";
+"pro_member" = "PRO会员";
+"pro_member_features" = "解锁全部高级功能，畅享语音朗读";
+"pro_features" = "会员特权";
+"unlimited_articles" = "无限文章";
+"unlimited_articles_desc" = "不限数量导入文档和文章";
+"current_plan" = "当前会员: ";
+"valid_until" = "有效期至: ";
+"manage_subscription" = "管理订阅";
+"select_plan" = "选择套餐";
+"subscribe_now" = "立即订阅";
+"restore_purchase" = "恢复购买";
+"restoring" = "正在恢复购买...";
+"processing_purchase" = "正在处理购买...";
+"loading_products" = "加载产品信息...";
+"subscription_note" = "订阅说明";
+"subscription_details" = "· 付款将在确认购买时，从iTunes账户中扣除\n· 订阅会在到期前24小时内自动续费，除非关闭自动续订\n· 您可以在购买后，前往iTunes账户设置管理或取消订阅\n· 已订阅的期间不可取消当前订阅";
+"monthly_subscription" = "月度会员";
+"quarterly_subscription" = "季度会员";
+"half_yearly_subscription" = "半年会员";
+"yearly_subscription" = "年度会员";
+"no_subscription" = "无订阅";
+"save_30_percent" = "省30%";
+"save_20_percent" = "省20%";
+"save_10_percent" = "省10%";
+"no_restorable_purchases" = "未找到可恢复的购买";
+
+/* Import Purchase */
+"buy_import_count" = "购买导入次数";
+"import_count" = "导入次数";
+"buy_import_desc" = "购买导入次数，导入更多精彩内容";
+"current_status" = "当前状态";
+"remaining_import_count" = "剩余导入次数";
+"times" = "次";
+"member_privilege" = "会员特权";
+"unlimited_import" = "无限导入";
+"select_purchase_plan" = "选择购买套餐";
+"import_times" = "次导入";
+"buy_now" = "立即购买";
+"processing" = "处理购买中...";
+"loading_products" = "加载产品中...";
+"purchase_note" = "购买说明";
+"import_purchase_details" = "• 购买的导入次数用于导入本地文档\n• 导入次数没有使用期限\n• PRO会员无需消耗导入次数";
+"purchase_success" = "购买成功";
+"purchased_import_count" = "已成功购买%d次导入机会";
+"please_login_first" = "请先登录再购买导入次数";

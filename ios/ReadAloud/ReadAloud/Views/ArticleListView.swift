@@ -1,9 +1,11 @@
 import SwiftUI
+import Combine
 
 struct ArticleListView: View {
     @StateObject private var articleManager: ArticleManager
     @StateObject private var listManager: ArticleListManager
     @StateObject private var speechManager: SpeechManager
+    @ObservedObject private var languageManager = LanguageManager.shared
     @State private var showingAddSheet = false
     @State private var editingArticle: Article? = nil
     @State private var navigationLinkTag: UUID? = nil
@@ -102,17 +104,17 @@ struct ArticleListView: View {
         }
         // 添加全局确认对话框
         .confirmationDialog(
-            "确认删除",
+            "confirm_delete".localized,
             isPresented: $showDeleteConfirmation,
             titleVisibility: .visible
         ) {
-            Button("取消", role: .cancel) {
+            Button("cancel".localized, role: .cancel) {
                 // 取消删除操作
                 print("取消删除")
                 articleToDelete = nil
             }
             
-            Button("删除", role: .destructive) {
+            Button("delete".localized, role: .destructive) {
                 // 确认删除文章
                 if let article = articleToDelete {
                     print("确认删除文章: \(article.title)")
@@ -128,9 +130,9 @@ struct ArticleListView: View {
             }
         } message: {
             if let article = articleToDelete {
-                Text("确定要删除文章\"\(article.title)\"吗？此操作无法撤销。")
+                Text("confirm_delete_message".localized(with: article.title))
             } else {
-                Text("确定要删除选中的文章吗？此操作无法撤销。")
+                Text("confirm_delete_message".localized(with: ""))
             }
         }
     }
@@ -155,17 +157,17 @@ struct ArticleListView: View {
             Button(action: {
                 showingAddListSheet = true
             }) {
-                Label("新增列表", systemImage: "plus")
+                Label("add_list".localized, systemImage: "plus")
             }
             
             Button(action: {
                 showingEditListSheet = true
             }) {
-                Label("编辑列表", systemImage: "pencil")
+                Label("edit_list".localized, systemImage: "pencil")
             }
         } label: {
             HStack(spacing: 8) {
-                Text(listManager.selectedList?.name ?? "阅读列表")
+                Text(listManager.selectedList?.name ?? "reading_list".localized)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.primary)
                 Image(systemName: "chevron.down")
@@ -181,10 +183,10 @@ struct ArticleListView: View {
     private var emptyStateView: some View {
         VStack {
             Spacer()
-            Text("\(listManager.selectedList?.name ?? "阅读列表")中没有文章")
+            Text("no_articles_in_list".localized(with: listManager.selectedList?.name ?? "reading_list".localized))
                 .font(.headline)
                 .foregroundColor(.gray)
-            Text("点击右上角的+按钮添加新文章")
+            Text("tap_to_add_article".localized)
                 .font(.subheadline)
                 .foregroundColor(.gray)
                 .padding(.top, 5)
@@ -209,7 +211,7 @@ struct ArticleListView: View {
         return VStack(spacing: 0) {
             // 显示当前选中列表的名称和文章数量
             HStack {
-                Text("\(listManager.selectedList?.name ?? "阅读列表") · \(filteredArticles.count)篇文章")
+                Text("articles_count".localized(with: listManager.selectedList?.name ?? "reading_list".localized, filteredArticles.count))
                     .font(.subheadline)
                     .foregroundColor(.gray)
                 
@@ -253,7 +255,7 @@ struct ArticleListView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "play.circle.fill")
                             .font(.system(size: 30))
-                        Text("播放全部")
+                        Text("play_all".localized)
                             .font(.system(size: 30, weight: .medium))
                     }
                     .foregroundColor(.blue)
@@ -365,7 +367,7 @@ struct ArticleListView: View {
             // 切换编辑模式
             isEditMode.toggle()
         }) {
-            Text(isEditMode ? "完成" : "管理")
+            Text(isEditMode ? "done".localized : "manage".localized)
                 .foregroundColor(isEditMode ? .blue : .primary)
                 .font(.system(size: 20, weight: .medium))
         }

@@ -3,14 +3,14 @@ import Combine
 
 /// 定时关闭选项
 enum TimerOption: String, CaseIterable, Identifiable {
-    case off = "不开启"
-    case afterChapter = "播完本章"
-    case after10Min = "10分钟后"
-    case after20Min = "20分钟后"
-    case after30Min = "30分钟后"
-    case after60Min = "60分钟后"
-    case after90Min = "90分钟后"
-    case custom = "自定义"
+    case off = "timer_off"
+    case afterChapter = "timer_after_chapter"
+    case after10Min = "timer_10min"
+    case after20Min = "timer_20min"
+    case after30Min = "timer_30min"
+    case after60Min = "timer_60min"
+    case after90Min = "timer_90min"
+    case custom = "timer_custom"
     
     var id: String { self.rawValue }
     

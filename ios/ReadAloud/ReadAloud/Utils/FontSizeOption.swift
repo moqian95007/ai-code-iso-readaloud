@@ -3,10 +3,10 @@ import SwiftUI
 
 // 字体大小选项枚举，用于管理应用内的字体大小设置
 enum FontSizeOption: String, CaseIterable {
-    case small = "小"
-    case medium = "中"
-    case large = "大"
-    case extraLarge = "特大"
+    case small = "font_size_small"
+    case medium = "font_size_medium"
+    case large = "font_size_large"
+    case extraLarge = "font_size_extra_large"
     
     // 返回对应的字体大小
     var size: CGFloat {
@@ -16,6 +16,11 @@ enum FontSizeOption: String, CaseIterable {
         case .large: return 22.0
         case .extraLarge: return 26.0
         }
+    }
+    
+    // 返回本地化的显示文本
+    var localizedText: String {
+        return self.rawValue.localized
     }
     
     // 返回下一个大小选项

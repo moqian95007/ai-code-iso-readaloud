@@ -8,8 +8,12 @@ struct ProfileView: View {
     @State private var isShowingLogin: Bool = false
     @State private var isShowingSubscription: Bool = false
     @State private var isShowingImportPurchase: Bool = false // 添加导入次数购买状态
+    @State private var isShowingLanguageSettings: Bool = false // 添加语言设置状态
     @State private var refreshView: Bool = false  // 添加刷新触发器
     @State private var showLoginAlert: Bool = false // 添加登录提示弹窗状态
+    
+    // 语言管理器
+    @ObservedObject private var languageManager = LanguageManager.shared
     
     var body: some View {
         NavigationView {
@@ -47,7 +51,7 @@ struct ProfileView: View {
                                 HStack {
                                     Image(systemName: "crown.fill")
                                         .foregroundColor(.yellow)
-                                    Text("PRO会员")
+                                    Text("pro_member".localized)
                                         .foregroundColor(.orange)
                                         .font(.system(size: 14, weight: .medium))
                                 }
@@ -58,7 +62,7 @@ struct ProfileView: View {
                             }
                             
                             // 所有用户都显示剩余导入次数
-                            Text("剩余导入\(user.remainingImportCount)次")
+                            Text("remaining_imports".localized(with: user.remainingImportCount))
                                 .font(.system(size: 14))
                                 .foregroundColor(.red)
                                 .padding(.vertical, 4)
@@ -74,7 +78,7 @@ struct ProfileView: View {
                     Button(action: {
                         isShowingLogin = true
                     }) {
-                        Text("登录/注册")
+                        Text("login_register".localized)
                             .font(.headline)
                             .foregroundColor(.white)
                             .frame(width: 200, height: 45)
@@ -104,13 +108,13 @@ struct ProfileView: View {
                                 .foregroundColor(.yellow)
                                 .frame(width: 30)
                             
-                            Text("会员订阅")
+                            Text("subscription".localized)
                                 .padding(.leading, 5)
                             
                             Spacer()
                             
                             if let user = userManager.currentUser, user.hasActiveSubscription {
-                                Text("PRO会员")
+                                Text("pro_member".localized)
                                     .font(.system(size: 14))
                                     .foregroundColor(.orange)
                             }
@@ -136,13 +140,13 @@ struct ProfileView: View {
                                 .foregroundColor(.blue)
                                 .frame(width: 30)
                             
-                            Text("购买导入次数")
+                            Text("buy_imports".localized)
                                 .padding(.leading, 5)
                             
                             Spacer()
                             
                             if let user = userManager.currentUser {
-                                Text("\(user.remainingImportCount)次")
+                                Text("\(user.remainingImportCount)")
                                     .font(.system(size: 14))
                                     .foregroundColor(.red)
                             }
@@ -154,16 +158,30 @@ struct ProfileView: View {
                         .padding(.vertical, 8)
                     }
                     
-                    if userManager.isLoggedIn {
-                        settingRow(icon: "person.crop.circle", title: "个人信息")
+                    // 语言设置选项
+                    Button(action: {
+                        isShowingLanguageSettings = true
+                    }) {
+                        HStack {
+                            Image(systemName: "globe")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            
+                            Text("language".localized)
+                                .padding(.leading, 5)
+                            
+                            Spacer()
+                            
+                            Text(languageManager.currentLanguage.displayName)
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 8)
                     }
-                    
-                    settingRow(icon: "gear", title: "设置")
-                    settingRow(icon: "star.fill", title: "我的收藏")
-                    settingRow(icon: "arrow.down.circle.fill", title: "下载管理")
-                    settingRow(icon: "moon.fill", title: "深色模式")
-                    settingRow(icon: "questionmark.circle", title: "帮助与反馈")
-                    settingRow(icon: "info.circle", title: "关于我们")
                     
                     if userManager.isLoggedIn {
                         // 退出登录按钮
@@ -175,7 +193,7 @@ struct ProfileView: View {
                                     .foregroundColor(.red)
                                     .frame(width: 30)
                                 
-                                Text("退出登录")
+                                Text("logout".localized)
                                     .foregroundColor(.red)
                                     .padding(.leading, 5)
                                 
@@ -189,7 +207,7 @@ struct ProfileView: View {
                 
                 Spacer()
             }
-            .navigationBarTitle("我的", displayMode: .inline)
+            .navigationBarTitle("tab_profile".localized, displayMode: .inline)
             .onAppear {
                 // 添加订阅状态更新通知观察者
                 NotificationCenter.default.addObserver(
@@ -211,13 +229,13 @@ struct ProfileView: View {
             }
             .id(refreshView) // 使用id强制视图在refreshView变化时重新构建
             // 添加登录提示弹窗
-            .alert("需要登录", isPresented: $showLoginAlert) {
-                Button("登录", role: .none) {
+            .alert("login_required".localized, isPresented: $showLoginAlert) {
+                Button("login".localized, role: .none) {
                     isShowingLogin = true
                 }
-                Button("取消", role: .cancel) {}
+                Button("cancel".localized, role: .cancel) {}
             } message: {
-                Text("请先登录以访问此功能")
+                Text("login_required_message".localized)
             }
         }
         .sheet(isPresented: $isShowingLogin) {
@@ -228,6 +246,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $isShowingImportPurchase) {
             ImportPurchaseView(isPresented: $isShowingImportPurchase)
+        }
+        .sheet(isPresented: $isShowingLanguageSettings) {
+            LanguageSettingsView(isPresented: $isShowingLanguageSettings)
         }
     }
     

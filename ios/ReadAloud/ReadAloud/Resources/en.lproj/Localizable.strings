@@ -1,0 +1,170 @@
+/* Main Tab View */
+"tab_home" = "Home";
+"tab_list" = "Lists";
+"tab_profile" = "Profile";
+
+/* File Read View */
+"no_documents" = "No documents imported yet";
+"import_document" = "Import Document";
+"import_in_progress" = "Importing...";
+"please_wait" = "Please wait, processing file";
+"import_success" = "Import Successful";
+"import_success_message" = "The document has been successfully imported and converted to readable text. Chapter recognition is in progress in the background, the document cannot be clicked until recognition is complete.";
+"import_failed" = "Import Failed";
+"manage" = "Manage";
+"done" = "Done";
+"format_not_supported" = "Format not supported";
+"format_error_message" = "Only txt, pdf and epub formats are supported";
+"supported_formats" = "(Only txt, pdf and epub formats are supported)";
+"tap_to_start" = "Tap to start reading";
+"played_percentage" = "Played %d%%";
+"cannot_load_document" = "Cannot load document";
+"document_empty_or_invalid" = "Document content is empty or not loaded correctly (%@)";
+"document_invalid" = "Document selection invalid";
+"document_empty" = "Document content is empty";
+"loading_chapters" = "Loading chapters...";
+
+/* Profile View */
+"login_register" = "Login/Register";
+"pro_member" = "PRO Member";
+"remaining_imports" = "Remaining imports: %d";
+"subscription" = "Subscription";
+"buy_imports" = "Buy Imports";
+"personal_info" = "Personal Info";
+"settings" = "Settings";
+"favorites" = "Favorites";
+"download_management" = "Download Management";
+"dark_mode" = "Dark Mode";
+"help_feedback" = "Help & Feedback";
+"about_us" = "About Us";
+"logout" = "Logout";
+"login_required" = "Login Required";
+"login_required_message" = "Please login to access this feature";
+"login" = "Login";
+"cancel" = "Cancel";
+
+/* Language Settings */
+"language" = "Language";
+"language_settings" = "Language Settings";
+"follow_system" = "Follow System";
+"chinese" = "Chinese";
+"english" = "English";
+"language_changed" = "Language Changed";
+"language_restart_message" = "Language setting has been changed. Some changes may require restarting the app to take full effect.";
+
+/* Article List View */
+"manage" = "Manage";
+"done" = "Done";
+"add_list" = "Add List";
+"edit_list" = "Edit List";
+"reading_list" = "Reading List";
+"articles_count" = "%@ · %d articles";
+"play_all" = "Play All";
+"no_articles_in_list" = "No articles in %@";
+"tap_to_add_article" = "Tap the + button to add a new article";
+"confirm_delete" = "Confirm Delete";
+"cancel" = "Cancel";
+"delete" = "Delete";
+"confirm_delete_message" = "Are you sure you want to delete \"%@\"? This action cannot be undone.";
+"date_format" = "MMM d, yyyy";
+
+/* Article Reader View */
+"start_from_beginning" = "Start from beginning";
+"article_list" = "List";
+"chapter" = "Chapter";
+"after_chapter" = "After chapter";
+"timer" = "Timer";
+"voice" = "Voice";
+"select_voice_prompt" = "Please select %@ voice to read %@ article";
+"night_mode" = "Night";
+"day_mode" = "Day";
+"font_size_small" = "Small";
+"font_size_medium" = "Medium";
+"font_size_large" = "Large";
+"font_size_extra_large" = "Extra Large";
+
+/* Playback Mode */
+"single_play" = "Single Play";
+"single_repeat" = "Single Repeat";
+"list_repeat" = "List Repeat";
+
+/* Article List Popover */
+"article_list_count" = "Article List (%d)";
+"close" = "Close";
+
+/* Timer Sheet */
+"timer_shutdown" = "Timer Shutdown";
+"enter_minutes" = "Enter minutes (1-120)";
+"minutes" = "minutes";
+"confirm" = "Confirm";
+"timer_off" = "Off";
+"timer_after_chapter" = "After Current Chapter";
+"timer_10min" = "After 10 Minutes";
+"timer_20min" = "After 20 Minutes";
+"timer_30min" = "After 30 Minutes";
+"timer_60min" = "After 60 Minutes";
+"timer_90min" = "After 90 Minutes";
+"timer_custom" = "Custom";
+
+/* Voice Selector */
+"loading_voices" = "Loading voices...";
+"select_matching_voice" = "Please select a voice matching the article language";
+"voice_count" = "%d voices";
+"select_language" = "Select Language";
+"back" = "Back";
+"alert_title" = "Alert";
+"ok" = "OK";
+
+/* Speed Selector */
+"adjust_speed" = "Adjust Speed"; 
+
+/* Language Settings */
+"follow_system" = "Follow System";
+
+/* Subscription */
+"subscribe_pro" = "Subscribe PRO";
+"pro_member" = "PRO Member";
+"pro_member_features" = "Unlock premium features, enjoy voice reading";
+"pro_features" = "PRO Features";
+"unlimited_articles" = "Unlimited Articles";
+"unlimited_articles_desc" = "Import unlimited documents and articles";
+"current_plan" = "Current Plan: ";
+"valid_until" = "Valid Until: ";
+"manage_subscription" = "Manage Subscription";
+"select_plan" = "Select Plan";
+"subscribe_now" = "Subscribe Now";
+"restore_purchase" = "Restore Purchase";
+"restoring" = "Restoring...";
+"processing_purchase" = "Processing purchase...";
+"loading_products" = "Loading products...";
+"subscription_note" = "Subscription Information";
+"subscription_details" = "· Payment will be charged to your iTunes account at confirmation of purchase\n· Subscription automatically renews unless auto-renew is turned off at least 24 hours before the end of the current period\n· You can manage or cancel your subscription in your iTunes account settings\n· No cancellation of the current subscription is allowed during active subscription period";
+"monthly_subscription" = "Monthly Plan";
+"quarterly_subscription" = "Quarterly Plan";
+"half_yearly_subscription" = "6-Month Plan";
+"yearly_subscription" = "Annual Plan";
+"no_subscription" = "No Subscription";
+"save_30_percent" = "Save 30%";
+"save_20_percent" = "Save 20%";
+"save_10_percent" = "Save 10%";
+"no_restorable_purchases" = "No restorable purchases found";
+
+/* Import Purchase */
+"buy_import_count" = "Buy Import Credits";
+"import_count" = "Import Credits";
+"buy_import_desc" = "Purchase import credits to import more content";
+"current_status" = "Current Status";
+"remaining_import_count" = "Remaining Imports";
+"times" = "times";
+"member_privilege" = "Member Privilege";
+"unlimited_import" = "Unlimited";
+"select_purchase_plan" = "Select Package";
+"import_times" = "imports";
+"buy_now" = "Buy Now";
+"processing" = "Processing...";
+"loading_products" = "Loading products...";
+"purchase_note" = "Purchase Information";
+"import_purchase_details" = "• Import credits are used for importing local documents\n• Import credits never expire\n• PRO members don't need to use import credits";
+"purchase_success" = "Purchase Successful";
+"purchased_import_count" = "Successfully purchased %d import credits";
+"please_login_first" = "Please log in before purchasing import credits";

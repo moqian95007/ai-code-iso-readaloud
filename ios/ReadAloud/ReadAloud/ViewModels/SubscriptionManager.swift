@@ -20,22 +20,32 @@ struct SubscriptionProduct {
     
     // 计算每月平均价格（仅用于显示）
     var pricePerMonth: String? {
-        guard let locale = product.priceLocale.currencySymbol else {
-            return nil
+        // 检查区域是否为中国
+        let regionCode = product.priceLocale.regionCode ?? Locale.current.regionCode ?? ""
+        let isChina = regionCode == "CN"
+        
+        // 获取正确的货币符号
+        let currencySymbol: String
+        if isChina {
+            currencySymbol = product.priceLocale.currencySymbol ?? "¥"
+        } else {
+            currencySymbol = "$" // 非中国区域统一使用美元符号
         }
         
         var monthlyPrice: Double = 0
+        let isChineseLanguage = LanguageManager.shared.currentLanguage.languageCode == "zh-Hans"
+        let perMonthText = isChineseLanguage ? "/月" : "/mo"
         
         switch type {
         case .quarterly:
             monthlyPrice = product.price.doubleValue / 3
-            return String(format: "%@%.2f/月", locale, monthlyPrice)
+            return String(format: "%@%.2f%@", currencySymbol, monthlyPrice, perMonthText)
         case .halfYearly:
             monthlyPrice = product.price.doubleValue / 6
-            return String(format: "%@%.2f/月", locale, monthlyPrice)
+            return String(format: "%@%.2f%@", currencySymbol, monthlyPrice, perMonthText)
         case .yearly:
             monthlyPrice = product.price.doubleValue / 12
-            return String(format: "%@%.2f/月", locale, monthlyPrice)
+            return String(format: "%@%.2f%@", currencySymbol, monthlyPrice, perMonthText)
         default:
             return nil
         }
@@ -484,7 +494,18 @@ extension SubscriptionManager: SKProductsRequestDelegate {
             for product in response.products {
                 let formatter = NumberFormatter()
                 formatter.numberStyle = .currency
-                formatter.locale = product.priceLocale
+                
+                // 检查区域是否为中国
+                let regionCode = product.priceLocale.regionCode ?? Locale.current.regionCode ?? ""
+                
+                if regionCode == "CN" {
+                    // 中国区域使用原始价格区域(人民币)
+                    formatter.locale = product.priceLocale
+                } else {
+                    // 非中国区域统一使用美元
+                    formatter.locale = Locale(identifier: "en_US")
+                    formatter.currencyCode = "USD"
+                }
                 
                 guard let price = formatter.string(from: product.price) else { continue }
                 

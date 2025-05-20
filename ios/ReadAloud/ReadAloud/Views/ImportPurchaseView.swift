@@ -62,21 +62,21 @@ struct ImportPurchaseView: View {
                 }
                 .padding(.bottom, 30)
             }
-            .navigationBarTitle("购买导入次数", displayMode: .inline)
+            .navigationBarTitle(Text("buy_import_count".localized), displayMode: .inline)
             .navigationBarItems(trailing: closeButton)
             .onAppear {
                 // 加载产品
                 importService.loadProducts()
             }
-            .alert("购买成功", isPresented: $showSuccessAlert) {
-                Button("确定", role: .cancel) {
+            .alert("purchase_success".localized, isPresented: $showSuccessAlert) {
+                Button("ok".localized, role: .cancel) {
                     // 关闭当前视图
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         isPresented.wrappedValue = false
                     }
                 }
             } message: {
-                Text("已成功购买\(purchasedCount)次导入机会")
+                Text(String(format: "purchased_import_count".localized, purchasedCount))
             }
         }
     }
@@ -110,12 +110,12 @@ struct ImportPurchaseView: View {
                         .font(.system(size: 32))
                         .foregroundColor(.white)
                     
-                    Text("导入次数")
+                    Text("import_count".localized)
                         .font(.system(size: 26, weight: .bold))
                         .foregroundColor(.white)
                 }
                 
-                Text("购买导入次数，导入更多精彩内容")
+                Text("buy_import_desc".localized)
                     .font(.system(size: 16))
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.top, 5)
@@ -128,7 +128,7 @@ struct ImportPurchaseView: View {
     // 当前状态视图
     private func currentStatusView(user: User) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("当前状态")
+            Text("current_status".localized)
                 .font(.headline)
                 .padding(.horizontal, 20)
             
@@ -137,11 +137,11 @@ struct ImportPurchaseView: View {
                     HStack {
                         Image(systemName: "doc.text.fill")
                             .foregroundColor(.blue)
-                        Text("剩余导入次数")
+                        Text("remaining_import_count".localized)
                             .font(.system(size: 16, weight: .medium))
                     }
                     
-                    Text("\(user.remainingImportCount) 次")
+                    Text("\(user.remainingImportCount) \("times".localized)")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.primary)
                 }
@@ -153,11 +153,11 @@ struct ImportPurchaseView: View {
                         HStack {
                             Image(systemName: "crown.fill")
                                 .foregroundColor(.yellow)
-                            Text("会员特权")
+                            Text("member_privilege".localized)
                                 .font(.system(size: 16, weight: .medium))
                         }
                         
-                        Text("无限导入")
+                        Text("unlimited_import".localized)
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.green)
                     }
@@ -173,7 +173,7 @@ struct ImportPurchaseView: View {
     // 购买选项视图
     private var purchaseOptionsView: some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text("选择购买套餐")
+            Text("select_purchase_plan".localized)
                 .font(.headline)
                 .padding(.horizontal, 20)
             
@@ -184,7 +184,7 @@ struct ImportPurchaseView: View {
             // 购买按钮
             if !importService.products.isEmpty {
                 Button(action: purchaseSelectedProduct) {
-                    Text("立即购买")
+                    Text("buy_now".localized)
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -213,7 +213,7 @@ struct ImportPurchaseView: View {
         }) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(product.count) 次导入")
+                    Text("\(product.count) \("import_times".localized)")
                         .font(.system(size: 18, weight: .semibold))
                     
                     Text(product.localizedPrice)
@@ -257,7 +257,7 @@ struct ImportPurchaseView: View {
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle())
             
-            Text(isPurchasing ? "处理购买中..." : "加载产品中...")
+            Text(isPurchasing ? "processing".localized : "loading_products".localized)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .padding(.leading, 8)
@@ -295,11 +295,11 @@ struct ImportPurchaseView: View {
     // 底部描述
     private var footerView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("购买说明")
+            Text("purchase_note".localized)
                 .font(.subheadline)
                 .fontWeight(.semibold)
             
-            Text("• 购买的导入次数用于导入本地文档\n• 导入次数没有使用期限\n• PRO会员无需消耗导入次数")
+            Text("import_purchase_details".localized)
                 .font(.footnote)
                 .foregroundColor(.secondary)
                 .lineSpacing(5)
@@ -319,7 +319,7 @@ struct ImportPurchaseView: View {
         
         // 检查用户是否已登录
         guard userManager.isLoggedIn else {
-            errorMessage = "请先登录再购买导入次数"
+            errorMessage = "please_login_first".localized
             showError = true
             return
         }

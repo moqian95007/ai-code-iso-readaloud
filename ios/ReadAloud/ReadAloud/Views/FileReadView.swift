@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import Combine
 
 // 添加全局控制变量
 fileprivate var isDocumentLoadingDisabled = false
@@ -22,6 +23,7 @@ struct FileReadView: View {
     @ObservedObject private var articleManager: ArticleManager // 移除单例引用
     @ObservedObject private var documentLibrary = DocumentLibraryManager.shared // 使用单例
     @StateObject private var documentManager: DocumentManager // 文档导入管理器
+    @ObservedObject private var languageManager = LanguageManager.shared // 语言管理器
     
     // 初始化
     init(articleManager: ArticleManager) {
@@ -64,7 +66,7 @@ struct FileReadView: View {
                             
                             // 如果没有导入的文档，显示提示
                             if documentLibrary.documents.isEmpty {
-                                Text("尚未导入任何文档")
+                                Text("no_documents".localized)
                                     .foregroundColor(.gray)
                                     .padding()
                             }
@@ -88,12 +90,12 @@ struct FileReadView: View {
                                 .padding()
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             
-                            Text("文档导入中...")
+                            Text("import_in_progress".localized)
                                 .font(.title2)
                                 .fontWeight(.bold)
                                 .foregroundColor(.white)
                             
-                            Text("请稍候，正在处理文件")
+                            Text("please_wait".localized)
                                 .font(.body)
                                 .foregroundColor(.white.opacity(0.8))
                         }
@@ -195,13 +197,13 @@ struct FileReadView: View {
                     }
                 }
             }
-            .alert("导入成功", isPresented: $showImportSuccess) {
-                Button("确定", role: .cancel) { }
+            .alert("import_success".localized, isPresented: $showImportSuccess) {
+                Button("OK", role: .cancel) { }
             } message: {
-                Text("文档已成功导入并转换为可朗读的文本。章节识别正在后台进行中，识别完成前文档暂不可点击。")
+                Text("import_success_message".localized)
             }
-            .alert("导入失败", isPresented: $showImportError) {
-                Button("确定", role: .cancel) { }
+            .alert("import_failed".localized, isPresented: $showImportError) {
+                Button("OK", role: .cancel) { }
             } message: {
                 Text(errorMessage)
             }
@@ -316,10 +318,11 @@ struct FileReadView: View {
 // 头部视图
 struct HeaderView: View {
     @Binding var isEditMode: Bool
+    @ObservedObject private var languageManager = LanguageManager.shared
     
     var body: some View {
         HStack {
-            Text("文件朗读")
+            Text("tab_home".localized)
                 .font(.system(size: 24, weight: .bold))
                 .padding(.leading)
             
@@ -330,7 +333,7 @@ struct HeaderView: View {
                 // 切换编辑模式
                 isEditMode.toggle()
             }) {
-                Text(isEditMode ? "完成" : "管理")
+                Text(isEditMode ? "done".localized : "manage".localized)
                     .foregroundColor(isEditMode ? .blue : .primary)
                     .font(.system(size: 18))
             }
@@ -355,6 +358,7 @@ struct ImportButton: View {
     
     // 获取UserManager实例
     @ObservedObject private var userManager = UserManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared // 语言管理器
     
     var body: some View {
         Button(action: {
@@ -388,10 +392,10 @@ struct ImportButton: View {
                 Image(systemName: "plus")
                     .font(.system(size: 40))
                     .foregroundColor(.gray)
-                Text("导入本地文档")
+                Text("import_document".localized)
                     .font(.system(size: 16))
                     .foregroundColor(.gray)
-                Text("(仅支持txt、pdf和epub格式)")
+                Text("supported_formats".localized)
                     .font(.system(size: 12))
                     .foregroundColor(.gray.opacity(0.8))
                 Spacer()
@@ -406,25 +410,25 @@ struct ImportButton: View {
             )
             .padding(.horizontal)
         }
-        .alert("需要登录", isPresented: $showLoginAlert) {
-            Button("取消", role: .cancel) {}
-            Button("去登录") {
+        .alert("login_required".localized, isPresented: $showLoginAlert) {
+            Button("cancel".localized, role: .cancel) {}
+            Button("login".localized) {
                 showLoginView = true  // 直接显示登录视图
             }
         } message: {
-            Text("您需要登录后才能导入本地文档")
+            Text("login_required_message".localized)
         }
         // 使用confirmationDialog替代alert，支持多个按钮
         .confirmationDialog("导入次数已用完", isPresented: $showSubscriptionAlert, titleVisibility: .visible) {
-            Button("订阅会员", role: .none) {
+            Button("subscription".localized, role: .none) {
                 showSubscriptionView = true  // 显示订阅视图
             }
             
-            Button("购买导入次数", role: .none) {
+            Button("buy_imports".localized, role: .none) {
                 showImportPurchaseView = true  // 显示导入次数购买视图
             }
             
-            Button("取消", role: .cancel) {}
+            Button("cancel".localized, role: .cancel) {}
         } message: {
             Text("您的免费导入次数已用完，可以选择订阅会员获得无限导入特权，或购买单次导入次数。")
         }
@@ -437,10 +441,10 @@ struct ImportButton: View {
         .sheet(isPresented: $showImportPurchaseView) {
             ImportPurchaseView(isPresented: $showImportPurchaseView)
         }
-        .alert("格式不支持", isPresented: $showFormatError) {
-            Button("确定", role: .cancel) { }
+        .alert("format_not_supported".localized, isPresented: $showFormatError) {
+            Button("OK", role: .cancel) { }
         } message: {
-            Text("仅支持导入txt、pdf和epub格式的文档")
+            Text("format_error_message".localized)
         }
         .id(refreshTrigger) // 使用刷新触发器强制重建视图
         .onAppear {
@@ -875,7 +879,7 @@ struct BookItem: View {
                         .lineLimit(2)
                     
                     if progress > 0 {
-                        Text("已播放\(Int(progress * 100))%")
+                        Text("played_percentage".localized(with: Int(progress * 100)))
                             .font(.subheadline)
                             .foregroundColor(.gray)
                         
@@ -884,7 +888,7 @@ struct BookItem: View {
                             .accentColor(.blue)
                             .frame(height: 5)
                     } else {
-                        Text("点击开始朗读")
+                        Text("tap_to_start".localized)
                             .font(.subheadline)
                             .foregroundColor(.gray)
                     }
@@ -965,7 +969,7 @@ struct DocumentReaderView: View {
                     VStack(spacing: 15) {
                         ProgressView()
                             .scaleEffect(1.5)
-                        Text("加载章节中...")
+                        Text("loading_chapters".localized)
                             .font(.headline)
                             .foregroundColor(.primary)
                     }
@@ -1048,13 +1052,13 @@ struct ErrorView: View {
             
             Spacer()
             
-            Text("无法加载文档")
+            Text("cannot_load_document".localized)
                 .font(.headline)
                 .foregroundColor(.red)
                 .padding()
             
-            let errorMsg = isDocValid ? "" : (docCopy == nil ? "文档选择无效" : "文档内容为空")
-            Text("文档内容为空或未正确加载 (\(errorMsg))")
+            let errorMsg = isDocValid ? "" : (docCopy == nil ? "document_invalid".localized : "document_empty".localized)
+            Text("document_empty_or_invalid".localized(with: errorMsg))
                 .font(.subheadline)
                 .foregroundColor(.gray)
                 .padding()

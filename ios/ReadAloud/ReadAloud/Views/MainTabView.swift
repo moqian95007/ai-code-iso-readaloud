@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// 主标签视图，管理应用程序的主要导航和标签栏
 struct MainTabView: View {
@@ -17,6 +18,7 @@ struct MainTabView: View {
     @StateObject private var articleManager: ArticleManager
     @ObservedObject private var listManager = ArticleListManager.shared
     @StateObject private var speechManager = SpeechManager.shared
+    @ObservedObject private var languageManager = LanguageManager.shared
     
     // 初始化方法
     init() {
@@ -33,7 +35,7 @@ struct MainTabView: View {
                 .tabItem {
                     VStack {
                         Image(systemName: "house.fill")
-                        Text("首页")
+                        Text("tab_home".localized)
                     }
                 }
                 .tag(0)
@@ -50,7 +52,7 @@ struct MainTabView: View {
                 .tabItem {
                     VStack {
                         Image(systemName: "doc.text.fill")
-                        Text("列表")
+                        Text("tab_list".localized)
                     }
                 }
                 .tag(1)
@@ -64,7 +66,7 @@ struct MainTabView: View {
                     .tabItem {
                         VStack {
                             Image(systemName: "person.fill")
-                            Text("我的")
+                            Text("tab_profile".localized)
                         }
                     }
                     .tag(2)

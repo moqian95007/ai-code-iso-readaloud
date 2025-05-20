@@ -41,7 +41,19 @@ class ImportPurchaseService: NSObject, ObservableObject {
             // 格式化价格
             let formatter = NumberFormatter()
             formatter.numberStyle = .currency
-            formatter.locale = product.priceLocale
+            
+            // 检查区域是否为中国
+            let regionCode = product.priceLocale.regionCode ?? Locale.current.regionCode ?? ""
+            
+            if regionCode == "CN" {
+                // 中国区域使用原始价格区域(人民币)
+                formatter.locale = product.priceLocale
+            } else {
+                // 非中国区域统一使用美元
+                formatter.locale = Locale(identifier: "en_US")
+                formatter.currencyCode = "USD"
+            }
+            
             self.localizedPrice = formatter.string(from: product.price) ?? "\(product.price)"
         }
     }

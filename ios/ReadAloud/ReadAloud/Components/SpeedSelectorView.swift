@@ -20,7 +20,7 @@ struct SpeedSelectorView: View {
     var body: some View {
         VStack(spacing: 20) {
             // 标题
-            Text("调语速")
+            Text("adjust_speed".localized)
                 .font(.headline)
                 .padding(.top, 20)
             
@@ -65,7 +65,7 @@ struct SpeedSelectorView: View {
                 .padding(.horizontal, 20)
             
             // 确认按钮
-            Button("关闭") {
+            Button("close".localized) {
                 // 更新选中的语速值
                 selectedRate = tempRate
                 // 保存设置

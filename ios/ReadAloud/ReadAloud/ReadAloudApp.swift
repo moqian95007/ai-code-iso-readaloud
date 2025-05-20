@@ -9,6 +9,7 @@ import SwiftUI
 import AVFoundation
 import UIKit
 import StoreKit
+import Combine
 
 // 确保引入了 PlaybackContentType 和 PlaybackManager
 // 这两个类型在 ArticleHighlightedText.swift 中定义
@@ -33,12 +34,19 @@ struct ReadAloudApp: App {
     // 添加 ArticleManager 实例
     @StateObject private var articleManager = ArticleManager()
     
+    // 添加语言管理器
+    @ObservedObject private var languageManager = LanguageManager.shared
+    
     // 添加一个对象，用于处理URL回调
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     // 初始化，设置后台音频播放
     init() {
         setupBackgroundAudio()
+        
+        // 初始化语言设置
+        _ = LanguageManager.shared
+        print("应用启动: 初始化语言设置为 \(LanguageManager.shared.currentLanguage.rawValue)")
         
         // 初始化StoreKit配置
         _ = StoreKitConfiguration.shared
@@ -153,6 +161,18 @@ struct ReadAloudApp: App {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 // 应用恢复到前台，同步播放状态
                 print("应用恢复到前台，同步播放状态")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name.languageDidChange)) { _ in
+                // 语言设置发生变化时的处理
+                print("语言设置已更改为: \(languageManager.currentLanguage.rawValue)")
+                
+                // 强制刷新所有视图
+                UserDefaults.standard.set(Date(), forKey: "lastLanguageChangeTime")
+                
+                // 确保更新所有UI
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                }
             }
         }
     }

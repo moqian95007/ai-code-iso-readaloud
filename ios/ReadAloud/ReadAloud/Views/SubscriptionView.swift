@@ -64,7 +64,7 @@ struct SubscriptionView: View {
                 }
                 .padding(.bottom, 30)
             }
-            .navigationBarTitle("订阅PRO会员", displayMode: .inline)
+            .navigationBarTitle(Text("subscribe_pro".localized), displayMode: .inline)
             .navigationBarItems(trailing: closeButton)
             .onAppear {
                 // 加载产品
@@ -124,12 +124,12 @@ struct SubscriptionView: View {
                         .font(.system(size: 32))
                         .foregroundColor(.yellow)
                     
-                    Text("PRO会员")
+                    Text("pro_member".localized)
                         .font(.system(size: 26, weight: .bold))
                         .foregroundColor(.white)
                 }
                 
-                Text("解锁全部高级功能，畅享语音朗读")
+                Text("pro_member_features".localized)
                     .font(.system(size: 16))
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.top, 5)
@@ -142,12 +142,12 @@ struct SubscriptionView: View {
     // 会员特权介绍
     private var featuresView: some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text("会员特权")
+            Text("pro_features".localized)
                 .font(.headline)
                 .padding(.horizontal, 20)
             
             VStack(spacing: 15) {
-                featureRow(icon: "books.vertical.fill", title: "无限文章", subtitle: "不限数量导入文档和文章")
+                featureRow(icon: "books.vertical.fill", title: "unlimited_articles".localized, subtitle: "unlimited_articles_desc".localized)
             }
             .padding(.horizontal, 5)
         }
@@ -190,11 +190,11 @@ struct SubscriptionView: View {
                     .foregroundColor(.green)
                 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("当前会员: \(user.subscriptionType.simplifiedDisplayName)")
+                    Text("current_plan".localized + user.subscriptionType.simplifiedDisplayName)
                         .font(.headline)
                     
                     if let endDate = user.subscriptionEndDate {
-                        Text("有效期至: \(formattedDate(endDate))")
+                        Text("valid_until".localized + formattedDate(endDate))
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -212,7 +212,7 @@ struct SubscriptionView: View {
                     UIApplication.shared.open(url)
                 }
             }) {
-                Text("管理订阅")
+                Text("manage_subscription".localized)
                     .font(.headline)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -229,7 +229,7 @@ struct SubscriptionView: View {
     private var subscriptionOptionsView: some View {
         VStack(spacing: 15) {
             // 标题
-            Text("选择套餐")
+            Text("select_plan".localized)
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -244,7 +244,7 @@ struct SubscriptionView: View {
             // 购买按钮
             if !subscriptionService.products.isEmpty {
                 Button(action: purchaseSelectedSubscription) {
-                    Text("立即订阅")
+                    Text("subscribe_now".localized)
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -264,7 +264,7 @@ struct SubscriptionView: View {
                 
                 // 恢复购买按钮
                 Button(action: restorePurchases) {
-                    Text("恢复购买")
+                    Text("restore_purchase".localized)
                         .font(.subheadline)
                         .foregroundColor(.blue)
                 }
@@ -300,7 +300,7 @@ struct SubscriptionView: View {
             // 标签
             if product.type == .yearly {
                 HStack {
-                    Text("省30%")
+                    Text("save_30_percent".localized)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)
@@ -313,7 +313,7 @@ struct SubscriptionView: View {
                 .padding(.top, 8)
             } else if product.type == .halfYearly {
                 HStack {
-                    Text("省20%")
+                    Text("save_20_percent".localized)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)
@@ -326,7 +326,7 @@ struct SubscriptionView: View {
                 .padding(.top, 8)
             } else if product.type == .quarterly {
                 HStack {
-                    Text("省10%")
+                    Text("save_10_percent".localized)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)
@@ -360,7 +360,7 @@ struct SubscriptionView: View {
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle())
             
-            Text(isRestoring ? "正在恢复购买..." : (isPurchasing ? "正在处理购买..." : "加载产品信息..."))
+            Text(isRestoring ? "restoring".localized : (isPurchasing ? "processing_purchase".localized : "loading_products".localized))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .padding(.leading, 10)
@@ -398,13 +398,13 @@ struct SubscriptionView: View {
     // 底部说明
     private var footerView: some View {
         VStack(spacing: 8) {
-            Text("订阅说明")
+            Text("subscription_note".localized)
                 .font(.footnote)
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            Text("· 付款将在确认购买时，从iTunes账户中扣除\n· 订阅会在到期前24小时内自动续费，除非关闭自动续订\n· 您可以在购买后，前往iTunes账户设置管理或取消订阅\n· 已订阅的期间不可取消当前订阅")
+            Text("subscription_details".localized)
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -449,15 +449,15 @@ struct SubscriptionView: View {
     private func getSubscriptionTitle(for type: SubscriptionType) -> String {
         switch type {
         case .monthly:
-            return "月度会员"
+            return "monthly_subscription".localized
         case .quarterly:
-            return "季度会员"
+            return "quarterly_subscription".localized
         case .halfYearly:
-            return "半年会员"
+            return "half_yearly_subscription".localized
         case .yearly:
-            return "年度会员"
+            return "yearly_subscription".localized
         case .none:
-            return "无订阅"
+            return "no_subscription".localized
         }
     }
     
@@ -466,8 +466,20 @@ struct SubscriptionView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        formatter.locale = Locale(identifier: "zh_CN")
-        return formatter.string(from: date)
+        
+        // 根据当前语言设置选择区域
+        let isChineseLanguage = LanguageManager.shared.currentLanguage.languageCode == "zh-Hans"
+        formatter.locale = Locale(identifier: isChineseLanguage ? "zh_CN" : "en_US")
+        
+        // 使用本地化的日期格式
+        if isChineseLanguage {
+            // 已有自定义的中文格式
+            return formatter.string(from: date)
+        } else {
+            // 使用本地化字符串中定义的日期格式
+            let dateString = formatter.string(from: date)
+            return dateString
+        }
     }
     
     // 购买选中的订阅
@@ -512,7 +524,7 @@ struct SubscriptionView: View {
                 switch result {
                 case .success(let type):
                     if type == nil || type == .none {
-                        self.errorMessage = "未找到可恢复的购买"
+                        self.errorMessage = "no_restorable_purchases".localized
                         self.showError = true
                     } else {
                         // 恢复成功，等待1秒后关闭订阅页面

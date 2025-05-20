@@ -1,5 +1,6 @@
 import Foundation
 import NaturalLanguage
+import SwiftUI
 
 struct Article: Identifiable, Codable, TextContent {
     var id = UUID()
@@ -14,8 +15,8 @@ struct Article: Identifiable, Codable, TextContent {
     // 用于显示创建时间的格式化字符串
     var formattedDate: String {
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        // 使用固定的日期时间格式，不依赖本地化
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: createdAt)
     }
     

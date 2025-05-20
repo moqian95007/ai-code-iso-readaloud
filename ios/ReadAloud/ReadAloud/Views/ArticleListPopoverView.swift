@@ -61,8 +61,8 @@ struct ArticleListPopoverView: View {
                         }
                     }
                 }
-                .navigationBarTitle("文章列表（共\(articles.count)篇）", displayMode: .inline)
-                .navigationBarItems(trailing: Button("关闭") {
+                .navigationBarTitle("article_list_count".localized(with: articles.count), displayMode: .inline)
+                .navigationBarItems(trailing: Button("close".localized) {
                     isPresented = false
                 })
             }
