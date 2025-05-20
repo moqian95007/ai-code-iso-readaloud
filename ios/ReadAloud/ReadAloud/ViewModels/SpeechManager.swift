@@ -793,6 +793,9 @@ class SpeechManager: ObservableObject {
             playbackManager.startPlayback(contentId: articleId, title: currentArticle?.title ?? "", type: contentType)
         }
         
+        // 强制刷新UI状态，确保时间显示正确
+        self.objectWillChange.send()
+        
         // 开始朗读
         synthesizer.speak(utterance)
         
@@ -803,7 +806,19 @@ class SpeechManager: ObservableObject {
         // 更新锁屏界面信息
         updateNowPlayingInfo()
         
-        // 开始定时器更新进度
+        // 确保总时间已正确计算 - 有可能之前计算不正确
+        if self.totalTime <= 0 && self.currentArticle != nil {
+            // 重新计算总时间
+            let wordsPerMinute = 200.0 * selectedRate
+            let estimatedMinutes = Double(self.currentText.count) / wordsPerMinute
+            self.totalTime = estimatedMinutes * 60.0
+            print("重新计算总时间: \(self.formatTime(self.totalTime))")
+        }
+        
+        // 强制刷新UI状态
+        self.objectWillChange.send()
+        
+        // 开始定时器更新进度 - 确保在状态设置和更新后启动
         startTimer()
         
         // 如果是因为文章切换而开始播放，添加日志信息
@@ -985,7 +1000,19 @@ class SpeechManager: ObservableObject {
         // 更新锁屏界面信息
         updateNowPlayingInfo()
         
-        // 开始定时器更新进度
+        // 确保总时间已正确计算
+        if self.totalTime <= 0 && self.currentArticle != nil {
+            // 重新计算总时间
+            let wordsPerMinute = 200.0 * selectedRate
+            let estimatedMinutes = Double(self.currentText.count) / wordsPerMinute
+            self.totalTime = estimatedMinutes * 60.0
+            print("重新计算总时间: \(self.formatTime(self.totalTime))")
+        }
+        
+        // 强制刷新UI状态
+        self.objectWillChange.send()
+        
+        // 开始定时器更新进度 - 确保在状态设置后启动
         startTimer()
     }
     
@@ -1456,39 +1483,77 @@ class SpeechManager: ObservableObject {
             UserDefaults.standard.set(currentProgress, forKey: UserDefaultsKeys.lastProgress(for: articleId))
             UserDefaults.standard.set(currentTime, forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
             UserDefaults.standard.set(isPlaying, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            
+            // 移除文档进度同步逻辑，避免频繁操作导致的卡顿
+            // 注意：文档进度将只在应用退出和定时自动保存时更新
         }
     }
     
     // 启动计时器，定期更新进度
     private func startTimer() {
+        // 先停止可能存在的计时器
         stopTimer()
         
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            if !self.isDragging && self.speechDelegate.isSpeaking {
-                let currentPosition = self.speechDelegate.highlightRange.location
-                if self.currentText.count > 0 && currentPosition > 0 {
-                    // 计算正常进度
-                    let calculatedProgress = Double(currentPosition) / Double(self.currentText.count)
-                    
-                    // 检查是否接近文章末尾（例如剩余不到5%的内容）
-                    if currentPosition >= Int(Double(self.currentText.count) * 0.95) {
-                        // 随着接近末尾，逐渐接近100%
-                        let remainingPercentage = Double(self.currentText.count - currentPosition) / Double(self.currentText.count)
-                        let adjustedProgress = 1.0 - (remainingPercentage * 0.5) // 缓慢接近1.0
-                        self.currentProgress = min(adjustedProgress, 1.0)
-                    } else {
-                        self.currentProgress = calculatedProgress
+        // 记录计时器启动位置和时间
+        print("启动计时器 - 当前进度: \(currentProgress), 当前时间: \(currentTime), 总时间: \(totalTime)")
+        
+        // 确保计时器是在主线程创建的
+        DispatchQueue.main.async {
+            self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                
+                // 无论是否拖动，都保持UI刷新，只有在拖动时不更新进度
+                if self.speechDelegate.isSpeaking {
+                    if !self.isDragging {
+                        // 使用高亮区域计算进度
+                        let currentPosition = self.speechDelegate.highlightRange.location
+                        if self.currentText.count > 0 && currentPosition > 0 {
+                            // 计算正常进度
+                            let calculatedProgress = Double(currentPosition) / Double(self.currentText.count)
+                            
+                            // 检查是否接近文章末尾
+                            if currentPosition >= Int(Double(self.currentText.count) * 0.95) {
+                                // 随着接近末尾，逐渐接近100%
+                                let remainingPercentage = Double(self.currentText.count - currentPosition) / Double(self.currentText.count)
+                                let adjustedProgress = 1.0 - (remainingPercentage * 0.5)
+                                self.currentProgress = min(adjustedProgress, 1.0)
+                            } else {
+                                self.currentProgress = calculatedProgress
+                            }
+                            
+                            // 确保计算时间
+                            self.currentTime = self.totalTime * self.currentProgress
+                        }
                     }
+                } else if self.isPlaying {
+                    // 即使代理没有检测到正在播放，但UI状态是播放中，也更新时间
+                    if !self.isDragging {
+                        self.currentTime += 0.1
+                        if self.totalTime > 0 {
+                            self.currentProgress = min(self.currentTime / self.totalTime, 1.0)
+                        }
+                    }
+                }
+                
+                // 强制触发UI更新 - 每次Timer触发都更新UI
+                self.objectWillChange.send()
+                
+                // 更新锁屏信息
+                self.updateNowPlayingInfo()
+                
+                // 每隔5分钟保存一次播放进度
+                if Int(self.currentTime) % 300 == 0 && Int(self.currentTime) > 0 {
+                    self.currentPlaybackPosition = self.speechDelegate.highlightRange.location
+                    self.savePlaybackProgress()
+                    print("自动保存播放进度 - 当前时间: \(self.formatTime(self.currentTime))")
                     
-                    self.currentTime = self.totalTime * self.currentProgress
-                    
-                    // 每隔5分钟保存一次播放进度
-                    if Int(self.currentTime) % 300 == 0 && Int(self.currentTime) > 0 { // 每300秒（5分钟）保存一次
-                        self.currentPlaybackPosition = currentPosition
-                        self.savePlaybackProgress()
-                        print("自动保存播放进度 - 当前时间: \(self.formatTime(self.currentTime))")
+                    // 定时器触发时同步文档进度（仅在定时自动保存时进行）
+                    // 检查是否是文档，如果是则发送保存文档进度通知
+                    let contentType = UserDefaults.standard.string(forKey: "lastPlayedContentType") ?? "article"
+                    if contentType == "document" {
+                        // 发送通知保存文档进度
+                        print("定时自动保存：检测到当前播放内容为文档类型，发送保存文档进度通知")
+                        NotificationCenter.default.post(name: Notification.Name("SaveDocumentProgress"), object: nil)
                     }
                 }
             }
@@ -1698,6 +1763,9 @@ class SpeechManager: ObservableObject {
         
         print("强制设置完成，从头开始播放")
         print("===================================")
+        
+        // 强制刷新UI状态
+        self.objectWillChange.send()
     }
     
     // 强制更新UI状态（进度条和高亮）- 供外部调用
@@ -1731,6 +1799,23 @@ class SpeechManager: ObservableObject {
                 print("警告: 无法更新UI，位置 \(updatePosition) 超出文本范围 0-\(self.currentText.count)")
             }
         }
+        
+        // 确保总时间已正确计算
+        if self.totalTime <= 0 && self.currentArticle != nil {
+            // 重新计算总时间
+            let wordsPerMinute = 200.0 * selectedRate
+            let estimatedMinutes = Double(self.currentText.count) / wordsPerMinute
+            self.totalTime = estimatedMinutes * 60.0
+            print("重新计算总时间: \(self.formatTime(self.totalTime))")
+        }
+        
+        // 确保进度与时间一致
+        if self.totalTime > 0 {
+            self.currentTime = self.totalTime * self.currentProgress
+        }
+        
+        // 强制通知UI更新
+        self.objectWillChange.send()
     }
     
     // 获取合成器当前状态
@@ -1921,5 +2006,17 @@ class SpeechManager: ObservableObject {
         currentText = ""
         
         print("播放列表和相关状态已清空")
+    }
+    
+    // 提供一个方法，可以直接获取和更新当前播放时间
+    func getCurrentTimeInfo() -> (current: TimeInterval, total: TimeInterval) {
+        // 如果正在播放但时间没有更新，则手动推进
+        if isPlaying && speechDelegate.isSpeaking {
+            // 检测到正在播放但时间可能停滞
+            // 强制触发UI更新
+            objectWillChange.send()
+        }
+        
+        return (currentTime, totalTime)
     }
 }

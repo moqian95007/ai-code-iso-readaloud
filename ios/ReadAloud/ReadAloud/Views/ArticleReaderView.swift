@@ -520,6 +520,10 @@ struct ArticleReaderView: View {
         let getLastPlaybackParagraphId: () -> String?
         let scrollToCurrentParagraph: (ScrollViewProxy) -> Void
         
+        // 添加防抖动状态
+        @State private var lastHighlightChangeTime = Date()
+        @State private var isProcessingScroll = false
+        
         var body: some View {
             ScrollView {
                 ScrollViewReader { scrollView in
@@ -532,9 +536,26 @@ struct ArticleReaderView: View {
                             themeManager: themeManager
                         )
                         .padding(.horizontal)
+                        .padding(.bottom, 150) // 增加底部填充，确保最后几段文本可以滚动到合适位置
                     }
-                    .onChange(of: speechDelegate.highlightRange) { _ in
-                        scrollToCurrentParagraph(scrollView)
+                    .onChange(of: speechDelegate.highlightRange) { newValue in
+                        // 防抖动处理：确保不会频繁触发滚动
+                        let now = Date()
+                        let timeSinceLastChange = now.timeIntervalSince(lastHighlightChangeTime)
+                        
+                        // 只有距离上次高亮变化超过0.5秒才考虑滚动，防止频繁滚动
+                        if timeSinceLastChange > 0.5 && !isProcessingScroll {
+                            isProcessingScroll = true // 标记正在处理滚动
+                            
+                            // 延迟执行滚动，让系统有时间稳定
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollToCurrentParagraph(scrollView)
+                                
+                                // 重置标志
+                                self.isProcessingScroll = false
+                                self.lastHighlightChangeTime = Date()
+                            }
+                        }
                     }
                     .onAppear {
                         // 初始化时滚动到上次播放位置
@@ -543,7 +564,7 @@ struct ArticleReaderView: View {
                                 if let paragraphId = getLastPlaybackParagraphId() {
                                     print("初始化时滚动到上次播放位置: \(paragraphId)")
                                     withAnimation {
-                                        scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: 0.25))
+                                        scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: 0.08))
                                     }
                                 }
                             }
@@ -551,6 +572,7 @@ struct ArticleReaderView: View {
                     }
                 }
             }
+            .scrollIndicators(.visible) // 显示滚动指示器，提供更好的视觉反馈
         }
     }
     
@@ -631,19 +653,88 @@ struct ArticleReaderView: View {
         }
     }
     
-    // 时间显示视图
+    // 时间显示视图 - 完全重写
     private struct TimeDisplayView: View {
         let speechManager: SpeechManager
         
+        // 使用State存储当前时间和总时间
+        @State private var currentTimeString: String = "00:00"
+        @State private var totalTimeString: String = "00:00"
+        @State private var refreshTimer: Timer?
+        @State private var uniqueID = UUID()  // 用于强制视图刷新
+        
         var body: some View {
             HStack {
-                Text(speechManager.formatTime(speechManager.currentTime))
+                Text(currentTimeString)
                     .font(.caption)
+                    .id("current\(uniqueID)")
+                
                 Spacer()
-                Text(speechManager.formatTime(speechManager.totalTime))
+                
+                Text(totalTimeString)
                     .font(.caption)
+                    .id("total\(uniqueID)")
             }
             .padding(.horizontal)
+            .onAppear {
+                // 初始设置时间显示
+                updateTimeDisplay()
+                // 启动定时器
+                startTimer()
+            }
+            .onDisappear {
+                stopTimer()
+            }
+        }
+        
+        // 更新时间显示
+        private func updateTimeDisplay() {
+            // 使用新方法获取时间，这会同时触发SpeechManager的UI刷新
+            let timeInfo = speechManager.getCurrentTimeInfo()
+            let currentTime = timeInfo.current
+            let totalTime = timeInfo.total
+            
+            // 格式化时间
+            currentTimeString = formatTime(currentTime)
+            totalTimeString = formatTime(totalTime)
+            
+            // 打印时间信息，帮助调试
+            if speechManager.isPlaying && (currentTime == 0 || totalTime == 0) {
+                print("时间异常: \(currentTimeString)/\(totalTimeString)")
+            }
+        }
+        
+        // 格式化时间显示
+        private func formatTime(_ seconds: TimeInterval) -> String {
+            let mins = Int(seconds) / 60
+            let secs = Int(seconds) % 60
+            return String(format: "%02d:%02d", mins, secs)
+        }
+        
+        // 启动独立定时器
+        private func startTimer() {
+            stopTimer()
+            
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+                // 确保在主线程更新UI
+                DispatchQueue.main.async {
+                    updateTimeDisplay()
+                    
+                    // 强制视图更新 - 通过改变ID
+                    uniqueID = UUID()
+                }
+            }
+            
+            // 确保定时器在主线程运行并添加到运行循环
+            if let timer = refreshTimer {
+                RunLoop.main.add(timer, forMode: .common)
+            }
+        }
+        
+        // 停止定时器
+        private func stopTimer() {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
         }
     }
     
@@ -1327,80 +1418,148 @@ struct ArticleReaderView: View {
         let playbackManager = PlaybackManager.shared
         
         // 只有在正在朗读状态且朗读的是当前文章时才考虑滚动
-        // 分解复杂表达式以避免编译器超时
-        let isGlobalPlaying = playbackManager.isPlaying
-        let isGlobalContentMatch = playbackManager.currentContentId == article.id
-        let isGlobalPlayingCurrentArticle = isGlobalPlaying && isGlobalContentMatch
+        let isGlobalPlaying = playbackManager.isPlaying && playbackManager.currentContentId == article.id
+        let isLocalPlaying = speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id
         
-        let isLocalPlaying = speechManager.isPlaying
-        let isLocalContentMatch = speechManager.getCurrentArticle()?.id == article.id
-        let isLocalPlayingCurrentArticle = isLocalPlaying && isLocalContentMatch
+        if !speechDelegate.isSpeaking || (!isGlobalPlaying && !isLocalPlaying) {
+            return // 如果没有朗读活动或不是当前文章，不滚动
+        }
         
-        if speechDelegate.isSpeaking && (isGlobalPlayingCurrentArticle || isLocalPlayingCurrentArticle) {
-            guard let paragraphId = getCurrentParagraphId(range: speechDelegate.highlightRange) else { return }
-            
-            // 提取段落索引
-            let paragraphIndex = Int(paragraphId.replacingOccurrences(of: "paragraph_", with: "")) ?? -1
-            
-            let now = Date()
-            let timeSinceLastScroll = now.timeIntervalSince(lastScrollTime)
-            
-            // 判断是否是新段落
-            let isNewParagraph = paragraphIndex != lastScrolledParagraph
-            
-            // 智能滚动条件:
-            // 1. 初始滚动 (currentVisibleParagraphId 为空)
-            // 2. 新段落 且 距上次滚动超过0.5秒
-            // 3. 段落跳转超过一个段落
-            let shouldScroll = currentVisibleParagraphId == nil || 
-                              (isNewParagraph && timeSinceLastScroll > 0.5) ||
-                              (isNewParagraph && abs(paragraphIndex - lastScrolledParagraph) > 1)
-            
-            if shouldScroll {
-                // 更新滚动状态
-                currentVisibleParagraphId = paragraphId
-                lastScrollTime = now
-                
-                // 计算是否是连续滚动
-                if isNewParagraph {
-                    if paragraphIndex == lastScrolledParagraph + 1 {
-                        // 连续向下滚动
-                        consecutiveScrollCount += 1
-                    } else {
-                        // 不是连续滚动，重置计数
-                        consecutiveScrollCount = 0
-                    }
-                    
-                    // 更新最后滚动的段落
-                    lastScrolledParagraph = paragraphIndex
-                }
-                
-                // 根据连续滚动次数动态调整锚点，实现越滚越少的效果
-                // 连续滚动越多次，锚点Y值越大，在视图中的位置越靠下
-                let dynamicAnchor: CGFloat = min(0.3 + CGFloat(min(consecutiveScrollCount, 5)) * 0.05, 0.6)
-                
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: dynamicAnchor))
-                }
-                
-                print("滚动到段落: \(paragraphId), 锚点: \(dynamicAnchor), 连续计数: \(consecutiveScrollCount)")
-            }
+        guard let paragraphId = getCurrentParagraphId(range: speechDelegate.highlightRange) else { return }
+        
+        // 提取段落索引
+        let paragraphIndex = Int(paragraphId.replacingOccurrences(of: "paragraph_", with: "")) ?? -1
+        
+        // ==== 严格滚动控制 ====
+        // 1. 检查是否与当前可见段落相同 - 如果相同，坚决不滚动
+        if paragraphId == currentVisibleParagraphId {
+            return
+        }
+        
+        // 2. 只有在绝对必要时才滚动：
+        // - 初始化时 (currentVisibleParagraphId 为空)
+        // - 段落跳转超过2个段落
+        // - 间隔足够长(1.5秒)且是新段落
+        let now = Date()
+        let timeSinceLastScroll = now.timeIntervalSince(lastScrollTime)
+        let isNewParagraph = paragraphIndex != lastScrolledParagraph
+        let isParagraphGapLarge = abs(paragraphIndex - lastScrolledParagraph) > 2
+        
+        // 高度保守的滚动策略，大大减少滚动次数
+        let shouldScroll = currentVisibleParagraphId == nil || 
+                          isParagraphGapLarge || 
+                          (isNewParagraph && timeSinceLastScroll > 1.5)
+        
+        if !shouldScroll {
+            return
+        }
+        
+        // 更新状态，准备滚动
+        currentVisibleParagraphId = paragraphId
+        lastScrollTime = now
+        
+        // 只有在段落确实发生变化时才考虑滚动
+        if !isNewParagraph {
+            return
+        }
+        
+        // 更新最后滚动的段落
+        lastScrolledParagraph = paragraphIndex
+        
+        // 固定锚点 - 使用更小的值，确保段落在屏幕更靠上的位置
+        let fixedAnchor: CGFloat = 0.08
+        
+        // 使用较长的动画持续时间，使滚动更平滑
+        let animationDuration: Double = 0.8
+        
+        print("滚动到段落: \(paragraphId), 索引: \(paragraphIndex)")
+        
+        // 确保安全地滚动
+        withAnimation(.easeInOut(duration: animationDuration)) {
+            scrollView.scrollTo(paragraphId, anchor: UnitPoint(x: 0, y: fixedAnchor))
         }
     }
     
     // 查找当前高亮范围所在的段落ID
     private func getCurrentParagraphId(range: NSRange) -> String? {
+        // 如果高亮范围无效，直接返回nil
+        if range.location == NSNotFound || range.length <= 0 {
+            return nil
+        }
+        
+        // 如果高亮范围太接近末尾，可能是边界情况，保留当前段落
+        if currentVisibleParagraphId != nil && range.location >= article.content.count - 5 {
+            return currentVisibleParagraphId
+        }
+        
         let paragraphs = article.content.components(separatedBy: "\n\n")
         var currentPosition = 0
+        var lastParaId: String? = nil
+        var closestDistance = Int.max
         
+        // 记录传入的高亮范围信息
+        print("获取段落ID - 高亮位置: \(range.location), 长度: \(range.length)")
+        
+        // 遍历所有段落，找到包含高亮范围的段落
         for (index, paragraph) in paragraphs.enumerated() {
-            let paragraphLength = paragraph.count + 2 // +2 for "\n\n"
+            let paragraphStart = currentPosition
+            let paragraphEnd = currentPosition + paragraph.count + 1  // +1 for at least one newline
             
-            if range.location >= currentPosition && range.location < currentPosition + paragraphLength {
-                return "paragraph_\(index)"
+            // 更严格的检查：高亮位置必须在段落范围内
+            if range.location >= paragraphStart && range.location <= paragraphEnd {
+                // 如果当前段落为空或非常短，不应该触发滚动
+                if paragraph.count < 10 {
+                    // 跳过很短的段落
+                    currentPosition += paragraph.count + 2
+                    continue
+                }
+                
+                let paragraphId = "paragraph_\(index)"
+                
+                // 计算高亮位置在段落中的相对位置
+                let relativePosition = range.location - paragraphStart
+                
+                // 如果高亮位置太接近段落边界（前5%或后5%），可能是边界情况
+                // 在这种情况下，如果已有当前段落ID，保留它以避免不必要的滚动
+                let isVeryNearBoundary = relativePosition < Int(Double(paragraph.count) * 0.05) || 
+                                       relativePosition > Int(Double(paragraph.count) * 0.95)
+                
+                if isVeryNearBoundary && currentVisibleParagraphId != nil {
+                    // 如果太接近边界且有当前段落ID，尝试检查这是否只是高亮的微小变化
+                    let currentIndex = Int(currentVisibleParagraphId!.replacingOccurrences(of: "paragraph_", with: "")) ?? -1
+                    
+                    // 如果当前段落与找到的段落相邻，优先保持当前段落不变
+                    if abs(currentIndex - index) <= 1 {
+                        print("高亮在段落边界，保持当前段落不变")
+                        return currentVisibleParagraphId
+                    }
+                }
+                
+                // 对于普通情况，返回找到的段落ID
+                return paragraphId
             }
             
-            currentPosition += paragraphLength
+            // 额外检查：如果没有找到精确匹配，记录最接近的段落
+            let distance = abs(range.location - (paragraphStart + paragraph.count / 2))
+            if distance < closestDistance {
+                closestDistance = distance
+                lastParaId = "paragraph_\(index)"
+            }
+            
+            // 更新位置计数器
+            currentPosition += paragraph.count + 2  // +2 for "\n\n"
+        }
+        
+        // 如果没有精确匹配，但有最近的段落，并且距离不是太远（100个字符以内）
+        if let lastId = lastParaId, closestDistance < 100 {
+            print("使用最接近的段落ID: \(lastId), 距离: \(closestDistance)")
+            return lastId
+        }
+        
+        // 如果找不到合适的段落ID，保留当前段落ID（如果有的话）
+        if currentVisibleParagraphId != nil {
+            print("无法确定段落，保留当前段落ID")
+            return currentVisibleParagraphId
         }
         
         return nil
@@ -1901,20 +2060,33 @@ struct ArticleReaderView: View {
     }
     
     // 添加处理文本点击事件的方法
-    private func handleTextTap(paragraphIndex: Int, paragraphId: String) {
-        print("点击了段落 \(paragraphIndex), ID: \(paragraphId)")
+    private func handleTextTap(paragraphIndex: Int, paragraphText: String) {
+        print("点击了段落 \(paragraphIndex), 内容: \(paragraphText.prefix(20))...")
         
         // 停止当前播放
         if speechManager.isPlaying {
             speechManager.pauseSpeaking()
         }
         
+        // 计算段落在文本中的实际字符位置
+        let paragraphs = article.content.components(separatedBy: "\n\n")
+        var characterPosition = 0
+        
+        // 计算到当前段落之前的所有文本长度
+        for i in 0..<paragraphIndex {
+            if i < paragraphs.count {
+                characterPosition += paragraphs[i].count + 2 // +2 为段落间的 "\n\n"
+            }
+        }
+        
+        print("计算得到的字符位置: \(characterPosition)")
+        
         // 设置起始位置和标志位
-        speechDelegate.startPosition = paragraphIndex
+        speechDelegate.startPosition = characterPosition
         speechDelegate.wasManuallyPaused = true
         
         // 从指定位置开始播放
-        speechManager.startSpeakingFromPosition(paragraphIndex)
+        speechManager.startSpeakingFromPosition(characterPosition)
     }
     
     // 隐藏底部标签栏

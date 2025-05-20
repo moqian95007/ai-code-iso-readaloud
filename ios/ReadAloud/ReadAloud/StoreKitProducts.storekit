@@ -1,4 +1,14 @@
 {
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
   "identifier" : "8D20ACAB",
   "nonRenewingSubscriptions" : [
 
@@ -88,7 +98,57 @@
   "settings" : {
     "_applicationInternalID" : "com.readaloud.app",
     "_developerTeamID" : "YOUR_TEAM_ID",
-    "_lastSynchronizedDate" : 689249087.10398602
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 689249087.10398602,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
   },
   "subscriptionGroups" : [
     {
@@ -118,6 +178,7 @@
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "7465F775",
+          "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "一个月内畅享所有高级功能",
@@ -134,7 +195,10 @@
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Monthly Membership",
           "subscriptionGroupID" : "20A49561",
-          "type" : "RecurringSubscription"
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
         },
         {
           "adHocOffers" : [
@@ -147,6 +211,7 @@
           "familyShareable" : false,
           "groupNumber" : 2,
           "internalID" : "2A3B9F84",
+          "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "三个月内畅享所有高级功能，每月仅需16元",
@@ -163,7 +228,10 @@
           "recurringSubscriptionPeriod" : "P3M",
           "referenceName" : "Quarterly Membership",
           "subscriptionGroupID" : "20A49561",
-          "type" : "RecurringSubscription"
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
         },
         {
           "adHocOffers" : [
@@ -176,6 +244,7 @@
           "familyShareable" : false,
           "groupNumber" : 3,
           "internalID" : "3B4CD095",
+          "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "六个月内畅享所有高级功能，每月仅需15元",
@@ -192,7 +261,10 @@
           "recurringSubscriptionPeriod" : "P6M",
           "referenceName" : "Half-Yearly Membership",
           "subscriptionGroupID" : "20A49561",
-          "type" : "RecurringSubscription"
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
         },
         {
           "adHocOffers" : [
@@ -205,6 +277,7 @@
           "familyShareable" : false,
           "groupNumber" : 4,
           "internalID" : "4C5DE1A6",
+          "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "一年内畅享所有高级功能，每月仅需13元",
@@ -221,13 +294,16 @@
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Yearly Membership",
           "subscriptionGroupID" : "20A49561",
-          "type" : "RecurringSubscription"
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
         }
       ]
     }
   ],
   "version" : {
-    "major" : 2,
+    "major" : 4,
     "minor" : 0
   }
-} 
+}

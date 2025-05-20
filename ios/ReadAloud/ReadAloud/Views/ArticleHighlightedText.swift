@@ -86,13 +86,35 @@ struct ArticleHighlightedText: View {
                 return false
             }
             
+            // 计算段落在完整文本中的精确位置
             var position = 0
             for i in 0..<paragraphIndex {
                 position += paragraphs[i].count + 2 // +2 for "\n\n"
             }
             
+            // 创建代表当前段落的范围
             let paragraphRange = NSRange(location: position, length: paragraph.count)
-            return NSIntersectionRange(paragraphRange, highlightRange).length > 0
+            
+            // 计算段落范围与高亮范围的交集
+            let intersection = NSIntersectionRange(paragraphRange, highlightRange)
+            let hasHighlight = intersection.length > 0
+            
+            // 记录详细的调试信息，帮助诊断问题
+            if hasHighlight {
+                // 仅记录高亮段落的调试信息，避免日志过多
+                let paragraphText = paragraph.prefix(20).replacingOccurrences(of: "\n", with: "")
+                let highlightStart = highlightRange.location - paragraphRange.location
+                let isNearStart = highlightStart < 20
+                let isNearEnd = highlightStart > (paragraph.count - 20)
+                
+                // 只在高亮接近段落开始或结束时记录日志，这通常是出问题的地方
+                if isNearStart || isNearEnd {
+                    let position = isNearStart ? "开始" : "结束"
+                    print("高亮段落[\(paragraphIndex)](\(position)): \"\(paragraphText)...\", 高亮位置: \(highlightStart)/\(paragraph.count)")
+                }
+            }
+            
+            return hasHighlight
         } 
         // 当不在播放但处于恢复状态时，高亮上次位置所在的段落
         else if speechManager.isResuming {
