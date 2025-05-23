@@ -13,17 +13,17 @@ class ImportPurchaseService: NSObject, ObservableObject {
     private let userManager = UserManager.shared
     
     // 产品ID
-    let singleImportProductId = "top.ai-toolkit.readaloud.import.single"
-    let threeImportsProductId = "top.ai-toolkit.readaloud.import.three"
-    let fiveImportsProductId = "top.ai-toolkit.readaloud.import.five"
-    let tenImportsProductId = "top.ai-toolkit.readaloud.import.ten"
+    let singleImportProductId = "import.single"
+    let threeImportsProductId = "import.three"
+    let fiveImportsProductId = "import.five"
+    let tenImportsProductId = "import.ten"
     
     // 导入次数对应字典
     let importCountsMap: [String: Int] = [
-        "top.ai-toolkit.readaloud.import.single": 1,
-        "top.ai-toolkit.readaloud.import.three": 3,
-        "top.ai-toolkit.readaloud.import.five": 5,
-        "top.ai-toolkit.readaloud.import.ten": 10
+        "import.single": 1,
+        "import.three": 3,
+        "import.five": 5,
+        "import.ten": 10
     ]
     
     // 产品结构

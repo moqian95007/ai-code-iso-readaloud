@@ -30,7 +30,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "top.ai-toolkit.readaloud.import.single",
+      "productID" : "import.single",
       "referenceName" : "Import 1 Time",
       "type" : "Consumable"
     },
@@ -50,7 +50,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "top.ai-toolkit.readaloud.import.three",
+      "productID" : "import.three",
       "referenceName" : "Import 3 Times",
       "type" : "Consumable"
     },
@@ -70,7 +70,7 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "top.ai-toolkit.readaloud.import.five",
+      "productID" : "import.five",
       "referenceName" : "Import 5 Times",
       "type" : "Consumable"
     },
@@ -90,13 +90,13 @@
           "locale" : "en_US"
         }
       ],
-      "productID" : "top.ai-toolkit.readaloud.import.ten",
+      "productID" : "import.ten",
       "referenceName" : "Import 10 Times",
       "type" : "Consumable"
     }
   ],
   "settings" : {
-    "_applicationInternalID" : "com.readaloud.app",
+    "_applicationInternalID" : "top.ai-toolkit.readaloud",
     "_developerTeamID" : "YOUR_TEAM_ID",
     "_failTransactionsEnabled" : false,
     "_lastSynchronizedDate" : 689249087.10398602,
@@ -152,7 +152,7 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "20A49561",
+      "id" : "top.ai-toolkit.readaloud.subscription",
       "localizations" : [
         {
           "description" : "解锁全部高级功能，畅享语音朗读",
@@ -191,10 +191,10 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "top.ai-toolkit.readaloud.subscription.monthly",
+          "productID" : "monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Monthly Membership",
-          "subscriptionGroupID" : "20A49561",
+          "subscriptionGroupID" : "top.ai-toolkit.readaloud.subscription",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 
@@ -224,10 +224,10 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "top.ai-toolkit.readaloud.subscription.quarterly",
+          "productID" : "quarterly",
           "recurringSubscriptionPeriod" : "P3M",
           "referenceName" : "Quarterly Membership",
-          "subscriptionGroupID" : "20A49561",
+          "subscriptionGroupID" : "top.ai-toolkit.readaloud.subscription",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 
@@ -257,10 +257,10 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "top.ai-toolkit.readaloud.subscription.halfYearly",
+          "productID" : "halfYearly",
           "recurringSubscriptionPeriod" : "P6M",
           "referenceName" : "Half-Yearly Membership",
-          "subscriptionGroupID" : "20A49561",
+          "subscriptionGroupID" : "top.ai-toolkit.readaloud.subscription",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 
@@ -290,10 +290,10 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "top.ai-toolkit.readaloud.subscription.yearly",
+          "productID" : "yearly",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Yearly Membership",
-          "subscriptionGroupID" : "20A49561",
+          "subscriptionGroupID" : "top.ai-toolkit.readaloud.subscription",
           "type" : "RecurringSubscription",
           "winbackOffers" : [
 

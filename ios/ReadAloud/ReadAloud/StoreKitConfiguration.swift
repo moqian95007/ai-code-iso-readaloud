@@ -90,13 +90,13 @@ class StoreKitConfiguration {
         // 获取订阅类型
         var subscriptionType: SubscriptionType = .none
         switch productId {
-        case "top.ai-toolkit.readaloud.subscription.monthly":
+        case "monthly":
             subscriptionType = .monthly
-        case "top.ai-toolkit.readaloud.subscription.quarterly":
+        case "quarterly":
             subscriptionType = .quarterly
-        case "top.ai-toolkit.readaloud.subscription.halfYearly":
+        case "halfYearly":
             subscriptionType = .halfYearly
-        case "top.ai-toolkit.readaloud.subscription.yearly":
+        case "yearly":
             subscriptionType = .yearly
         default:
             print("未知的产品ID: \(productId)")

@@ -58,10 +58,10 @@ class SubscriptionManager: NSObject, ObservableObject {
     static let shared = SubscriptionManager()
     
     // 产品ID
-    private let monthlyProductId = "top.ai-toolkit.readaloud.subscription.monthly"
-    private let quarterlyProductId = "top.ai-toolkit.readaloud.subscription.quarterly"
-    private let halfYearlyProductId = "top.ai-toolkit.readaloud.subscription.halfYearly"
-    private let yearlyProductId = "top.ai-toolkit.readaloud.subscription.yearly"
+    private let monthlyProductId = "monthly"
+    private let quarterlyProductId = "quarterly"
+    private let halfYearlyProductId = "halfYearly"
+    private let yearlyProductId = "yearly"
     
     // 可用产品列表
     @Published var availableProducts: [SubscriptionProduct] = []

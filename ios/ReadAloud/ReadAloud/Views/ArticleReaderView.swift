@@ -165,7 +165,8 @@ struct ArticleReaderView: View {
             Spacer()
             
             // 将底部控制区域提取为单独的视图
-            BottomControlView(
+            // 创建一个局部变量来存储BottomControlView，以减少表达式复杂度
+            let bottomControlView = BottomControlView(
                 article: article,
                 speechManager: speechManager,
                 speechDelegate: speechDelegate,
@@ -187,6 +188,9 @@ struct ArticleReaderView: View {
                 getListArticles: { self.listArticles },
                 extractChapterNumber: extractChapterNumber
             )
+            
+            // 使用创建的视图
+            bottomControlView
         }
         .onAppear {
             print("ArticleReaderView 出现")
@@ -891,14 +895,24 @@ struct ArticleReaderView: View {
                 
                 // 播放/暂停按钮
                 Button(action: {
-                    // 将原来的按钮动作逻辑移到这里
-                    handlePlayButtonTapped()
+                    if playbackManager.isPlaying && playbackManager.currentContentId != article.id {
+                        // 如果当前有其他内容在播放，先停止它
+                        playbackManager.stopPlayback()
+                        // 短暂延迟后再开始播放
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            handlePlayPauseAction()
+                        }
+                        return
+                    }
+                    
+                    handlePlayPauseAction()
                 }) {
                     // 计算播放按钮显示状态
                     let isLocalPlaying = speechManager.isPlaying && speechManager.getCurrentArticle()?.id == article.id
                     let isGlobalPlaying = playbackManager.isPlaying && playbackManager.currentContentId == article.id
                     let shouldShowPlaying = isLocalPlaying || isGlobalPlaying
                     
+                    // 不再根据isProcessingAudio显示进度，直接显示播放/暂停按钮
                     Image(systemName: shouldShowPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .resizable()
                         .frame(width: 50, height: 50)
@@ -938,7 +952,7 @@ struct ArticleReaderView: View {
         }
         
         // 将播放按钮的逻辑提取到独立方法中
-        private func handlePlayButtonTapped() {
+        private func handlePlayPauseAction() {
             // 获取全局播放状态
             let playbackManager = PlaybackManager.shared
             

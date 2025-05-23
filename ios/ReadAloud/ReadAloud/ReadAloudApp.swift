@@ -10,6 +10,7 @@ import AVFoundation
 import UIKit
 import StoreKit
 import Combine
+import CoreData
 
 // 确保引入了 PlaybackContentType 和 PlaybackManager
 // 这两个类型在 ArticleHighlightedText.swift 中定义
@@ -70,6 +71,9 @@ struct ReadAloudApp: App {
     @StateObject private var documentLibrary = DocumentLibraryManager.shared
     
     init() {
+        // 预加载AudioFileManager以确保它被初始化
+        _ = AudioFileManager.shared
+        
         // 设置主题 - 修复updateTheme调用
         let colorScheme = isDarkMode ? ColorScheme.dark : ColorScheme.light
         // 检查ThemeManager是否有updateTheme方法，如果没有则跳过
