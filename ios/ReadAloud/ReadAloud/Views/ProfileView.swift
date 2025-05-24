@@ -11,6 +11,7 @@ struct ProfileView: View {
     @State private var isShowingLanguageSettings: Bool = false // 添加语言设置状态
     @State private var refreshView: Bool = false  // 添加刷新触发器
     @State private var showLoginAlert: Bool = false // 添加登录提示弹窗状态
+    @State private var isShowingAbout: Bool = false // 添加关于页面状态
     
     // 语言管理器
     @ObservedObject private var languageManager = LanguageManager.shared
@@ -183,6 +184,27 @@ struct ProfileView: View {
                         .padding(.vertical, 8)
                     }
                     
+                    // 添加关于我们选项
+                    Button(action: {
+                        isShowingAbout = true
+                    }) {
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            
+                            Text("about_us".localized)
+                                .padding(.leading, 5)
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
                     if userManager.isLoggedIn {
                         // 退出登录按钮
                         Button(action: {
@@ -249,6 +271,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $isShowingLanguageSettings) {
             LanguageSettingsView(isPresented: $isShowingLanguageSettings)
+        }
+        .sheet(isPresented: $isShowingAbout) {
+            AboutView(isPresented: $isShowingAbout)
         }
     }
     

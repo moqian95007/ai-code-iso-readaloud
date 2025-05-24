@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		932998842DD4D27C009270AB /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 932998832DD4D27C009270AB /* StoreKit.framework */; };
+		935E22032DE176F100CEC37D /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 935E22022DE176F100CEC37D /* SystemConfiguration.framework */; };
 		93D7B5802DA42A33003FA2A6 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 93D7B57F2DA42A33003FA2A6 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -33,6 +34,7 @@
 		9314F2C92D95940E008A5C13 /* ReadAloudTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ReadAloudTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9314F2D32D95940E008A5C13 /* ReadAloudUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ReadAloudUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		932998832DD4D27C009270AB /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
+		935E22022DE176F100CEC37D /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk/System/Library/Frameworks/SystemConfiguration.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,6 +60,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				935E22032DE176F100CEC37D /* SystemConfiguration.framework in Frameworks */,
 				93D7B5802DA42A33003FA2A6 /* ZIPFoundation in Frameworks */,
 				932998842DD4D27C009270AB /* StoreKit.framework in Frameworks */,
 			);
@@ -104,6 +107,7 @@
 		93D7B57E2DA42A33003FA2A6 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				935E22022DE176F100CEC37D /* SystemConfiguration.framework */,
 				932998832DD4D27C009270AB /* StoreKit.framework */,
 			);
 			name = Frameworks;

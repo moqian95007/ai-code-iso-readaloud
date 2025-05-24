@@ -168,3 +168,23 @@
 "purchase_success" = "Purchase Successful";
 "purchased_import_count" = "Successfully purchased %d import credits";
 "please_login_first" = "Please log in before purchasing import credits";
+
+/* About View */
+"about" = "About";
+"app_tagline" = "Your Smart Reading Assistant";
+"version" = "Version";
+"legal_info" = "Legal Information";
+"privacy_policy" = "Privacy Policy";
+"terms_of_service" = "Terms of Service";
+"support" = "Support";
+"technical_support" = "Technical Support";
+"send_feedback_email" = "Send Feedback Email";
+"developer_options" = "Developer Options";
+"view_logs" = "View Logs";
+"clear_logs" = "Clear Logs";
+"logs_cleared" = "Logs Cleared";
+"sandbox_environment" = "Sandbox Environment";
+"yes" = "Yes";
+"no" = "No";
+"developer_mode_enabled" = "Developer Mode Enabled";
+"developer_mode_disabled" = "Developer Mode Disabled";

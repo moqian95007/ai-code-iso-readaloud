@@ -41,6 +41,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>fetch</string>
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
@@ -89,6 +90,8 @@
 		<key>Configuration</key>
 		<string>StoreKitProducts</string>
 	</dict>
+	<key>com.apple.developer.in-app-payments</key>
+	<array/>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

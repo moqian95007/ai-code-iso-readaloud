@@ -14,7 +14,7 @@ import Combine
 // 确保引入了 PlaybackContentType 和 PlaybackManager
 // 这两个类型在 ArticleHighlightedText.swift 中定义
 
-// 临时定义CacheManager，如果项目中没有这个类
+// 临时添加CacheManager类用于初始化字体
 class CacheManager {
     static let shared = CacheManager()
     
@@ -24,21 +24,15 @@ class CacheManager {
     }
 }
 
-// 临时定义LogManager，如果项目中没有这个类
-class LogManager {
-    static func setup() {
-        // 临时空实现
-        print("设置日志系统")
-    }
-}
-
 @main
 struct ReadAloudApp: App {
-    // 获取环境
+    // 应用状态
     @Environment(\.scenePhase) private var scenePhase
     
-    // 获取AppStorage
+    // 主题管理
     @AppStorage("isDarkMode") private var isDarkMode = false
+    @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var documentLibrary = DocumentLibraryManager.shared
     
     // 使用ObservedObject来订阅FloatingBallManager的变化
     @ObservedObject private var floatingBallManager = FloatingBallManager.shared
@@ -46,14 +40,11 @@ struct ReadAloudApp: App {
     // 添加一个状态变量跟踪当前是否在播放页面
     @State private var isInPlaybackView = false
     
-    // 添加SpeechManager实例
+    // 共享管理器
     @ObservedObject private var speechManager = SpeechManager.shared
-    
-    // 添加PlaybackManager实例，用于全局播放状态管理
     @ObservedObject private var playbackManager = PlaybackManager.shared
-    
-    // 添加UserManager实例，用于管理用户状态
     @ObservedObject private var userManager = UserManager.shared
+    private let subscriptionManager = SubscriptionManager.shared
     
     // 添加 ArticleManager 实例
     @StateObject private var articleManager = ArticleManager()
@@ -66,76 +57,89 @@ struct ReadAloudApp: App {
     
     // 保存所有视图使用的状态
     @StateObject private var listManager = ArticleListManager.shared
-    @StateObject private var themeManager = ThemeManager.shared
-    @StateObject private var documentLibrary = DocumentLibraryManager.shared
     
     init() {
+        // 设置日志系统
+        LogManager.setup()
+        LogManager.shared.log("应用启动", level: .info, category: "App")
+        
+        // 初始化默认设置
+        initializeDefaultSettings()
+        
         // 设置主题 - 修复updateTheme调用
         let colorScheme = isDarkMode ? ColorScheme.dark : ColorScheme.light
-        // 检查ThemeManager是否有updateTheme方法，如果没有则跳过
-        // themeManager.updateTheme(for: colorScheme)
+        UIApplication.updateTheme(with: colorScheme)
         
+        // 设置界面默认外观
+        configureAppearance()
+        
+        // 初始化StoreKit测试交易观察
+        StoreKitConfiguration.shared.enableStoreKitTestObserver()
+        
+        // 设置用户管理器
+        // UserManager.shared.setupAuthentication()  // 该方法不存在，暂时注释
+        
+        // 添加应用启动时的详细日志
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // 获取收据数据并详细记录
+            if let receiptURL = Bundle.main.appStoreReceiptURL {
+                if let receiptData = try? Data(contentsOf: receiptURL) {
+                    print("收据数据长度：\(receiptData.count)")
+                    print("收据URL路径：\(receiptURL.path)")
+                    print("收据文件名：\(receiptURL.lastPathComponent)")
+                    print("是否沙盒收据：\(receiptURL.lastPathComponent == "sandboxReceipt")")
+                    
+                    LogManager.shared.log("收据文件名：\(receiptURL.lastPathComponent)", level: .debug, category: "StoreKit")
+                    LogManager.shared.log("是否沙盒收据：\(receiptURL.lastPathComponent == "sandboxReceipt")", level: .debug, category: "StoreKit")
+                } else {
+                    print("⚠️ 无法获取App Store收据数据 - 文件无法读取")
+                    LogManager.shared.log("无法获取App Store收据数据 - 文件无法读取", level: .warning, category: "StoreKit")
+                }
+            } else {
+                print("⚠️ 无法获取App Store收据数据 - 收据URL为空")
+                LogManager.shared.log("无法获取App Store收据数据 - 收据URL为空", level: .warning, category: "StoreKit")
+            }
+            
+            // 检查编译模式
+            #if DEBUG
+            print("应用编译模式: DEBUG")
+            LogManager.shared.log("应用编译模式: DEBUG", level: .debug, category: "App")
+            #else
+            print("应用编译模式: RELEASE")
+            LogManager.shared.log("应用编译模式: RELEASE", level: .debug, category: "App")
+            #endif
+            
+            // 检查当前设备信息
+            let device = UIDevice.current
+            print("设备信息: \(device.name), \(device.systemName) \(device.systemVersion)")
+            LogManager.shared.log("设备信息: \(device.name), \(device.systemName) \(device.systemVersion)", level: .info, category: "App")
+            
+            // 预加载用户订阅状态
+            // SubscriptionManager.shared.checkActiveSubscription(forceRefresh: true)  // 该方法不存在，暂时注释
+        }
+    }
+    
+    // 配置UI默认外观
+    private func configureAppearance() {
         // 初始化自定义字体
         CacheManager.shared.initializeCustomFonts()
         
-        setupBackgroundAudio()
-        
-        // 初始化语言设置
-        _ = LanguageManager.shared
-        print("应用启动: 初始化语言设置为 \(LanguageManager.shared.currentLanguage.rawValue)")
-        
-        // 初始化StoreKit配置
-        _ = StoreKitConfiguration.shared
-        StoreKitConfiguration.shared.enableStoreKitTestObserver()
-        
-        // 初始化订阅检查器
-        _ = SubscriptionChecker.shared
-        
-        // 初始化订阅服务
-        _ = SubscriptionService.shared
-        
-        // 应用启动时同步用户状态
-        syncUserStatusOnLaunch()
-    }
-    
-    // 设置后台音频会话
-    private func setupBackgroundAudio() {
+        // 设置后台音频会话
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay, .duckOthers, .mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("设置后台音频会话失败: \(error.localizedDescription)")
+            LogManager.shared.log("设置后台音频会话失败: \(error.localizedDescription)", level: .error, category: "App")
         }
+        
+        // 初始化语言设置
+        _ = languageManager
+        print("应用启动: 初始化语言设置为 \(languageManager.currentLanguage.rawValue)")
+        LogManager.shared.log("初始化语言设置为 \(languageManager.currentLanguage.rawValue)", level: .info, category: "App")
     }
     
-    // 应用启动时同步用户状态
-    private func syncUserStatusOnLaunch() {
-        // 检查用户是否已登录
-        if userManager.isLoggedIn, let user = userManager.currentUser, user.isTokenValid {
-            print("应用启动: 用户已登录，同步用户状态")
-            
-            // 创建同步队列
-            let syncQueue = DispatchQueue(label: "com.readaloud.syncQueue", qos: .utility)
-            
-            // 异步执行同步操作
-            syncQueue.async {
-                // 1. 同步订阅状态
-                SubscriptionRepository.shared.loadSubscriptionsForUser(user.id)
-                
-                // 2. 同步剩余导入数量
-                self.userManager.syncRemoteImportCountToLocal(user: user)
-                
-                // 完成同步后发送通知，更新UI
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                    print("应用启动: 用户状态同步完成")
-                }
-            }
-        } else {
-            print("应用启动: 用户未登录，跳过同步")
-        }
-    }
-    
+    // 应用视图
     var body: some Scene {
         WindowGroup {
             ZStack {

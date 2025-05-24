@@ -57,11 +57,8 @@ class SubscriptionManager: NSObject, ObservableObject {
     // 单例模式
     static let shared = SubscriptionManager()
     
-    // 产品ID
-    private let monthlyProductId = "top.ai-toolkit.readaloud.subscription.monthly"
-    private let quarterlyProductId = "top.ai-toolkit.readaloud.subscription.quarterly"
-    private let halfYearlyProductId = "top.ai-toolkit.readaloud.subscription.halfYearly"
-    private let yearlyProductId = "top.ai-toolkit.readaloud.subscription.yearly"
+    // 产品ID管理器
+    private let productIdManager = ProductIdManager.shared
     
     // 可用产品列表
     @Published var availableProducts: [SubscriptionProduct] = []
@@ -95,23 +92,247 @@ class SubscriptionManager: NSObject, ObservableObject {
         super.init()
         // 设置SKPaymentTransactionObserver
         SKPaymentQueue.default().add(self)
+        
+        // 观察产品加载完成的通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleProductsLoaded(_:)),
+            name: NSNotification.Name("StoreKitProductsLoaded"),
+            object: nil
+        )
+        
+        // 尝试从缓存中获取产品
+        checkCachedProducts()
     }
     
     deinit {
         SKPaymentQueue.default().remove(self)
+        // 移除观察者
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    /// 从缓存中获取产品信息
+    private func checkCachedProducts() {
+        let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
+        
+        // 如果缓存中有产品，则直接使用
+        if !cachedProducts.isEmpty {
+            processProducts(Array(cachedProducts.values))
+        }
+    }
+    
+    /// 处理StoreKitProductsLoaded通知
+    @objc private func handleProductsLoaded(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let products = userInfo["products"] as? [String: SKProduct] else {
+            return
+        }
+        
+        // 处理加载的产品
+        processProducts(Array(products.values))
+    }
+    
+    /// 处理产品列表
+    private func processProducts(_ skProducts: [SKProduct]) {
+        print("========== SubscriptionManager.processProducts 开始 ==========")
+        LogManager.shared.log("处理订阅产品开始，共\(skProducts.count)个", level: .info, category: "订阅")
+        
+        // 处理订阅产品
+        var subscriptionProducts: [SubscriptionProduct] = []
+        
+        // 详细记录处理的产品
+        print("⏱️ 开始处理获取到的产品，共\(skProducts.count)个")
+        
+        if skProducts.isEmpty {
+            print("⚠️ 产品列表为空，无法处理")
+            print("❗️请检查App Store Connect中产品配置是否正确")
+            print("❗️TestFlight环境需要确保产品已通过审核且状态为'已准备提交'")
+            LogManager.shared.log("产品列表为空，请检查App Store Connect配置", level: .warning, category: "订阅")
+        } else {
+            print("产品ID列表:")
+            LogManager.shared.log("获取到的产品ID列表:", level: .info, category: "订阅")
+            for (index, product) in skProducts.enumerated() {
+                print("  \(index+1). \(product.productIdentifier) - \(product.localizedTitle)")
+                LogManager.shared.log("  \(index+1). \(product.productIdentifier) - \(product.localizedTitle)", level: .debug, category: "订阅")
+            }
+        }
+        
+        for product in skProducts {
+            // 判断产品ID是否为订阅产品
+            if product.productIdentifier.contains("subscription") {
+                // 解析订阅类型
+                var type: SubscriptionType = .none
+                switch product.productIdentifier {
+                case productIdManager.subscriptionMonthly:
+                    type = .monthly
+                    print("找到月度订阅产品: \(product.localizedTitle)")
+                case productIdManager.subscriptionQuarterly:
+                    type = .quarterly
+                    print("找到季度订阅产品: \(product.localizedTitle)")
+                case productIdManager.subscriptionHalfYearly:
+                    type = .halfYearly
+                    print("找到半年订阅产品: \(product.localizedTitle)")
+                case productIdManager.subscriptionYearly:
+                    type = .yearly
+                    print("找到年度订阅产品: \(product.localizedTitle)")
+                default:
+                    print("忽略未知订阅产品: \(product.productIdentifier)")
+                    continue
+                }
+                
+                // 验证产品价格信息
+                if product.price.doubleValue <= 0 {
+                    print("⚠️ 产品价格异常: \(product.price.doubleValue)")
+                    continue
+                }
+                
+                // 创建SubscriptionProduct对象
+                let subscriptionProduct = SubscriptionProduct(
+                    id: product.productIdentifier,
+                    type: type,
+                    product: product,
+                    localizedPrice: formatPrice(product),
+                    localizedPeriod: getPeriodText(for: type)
+                )
+                
+                // 添加到产品列表
+                subscriptionProducts.append(subscriptionProduct)
+                print("成功添加产品: \(product.productIdentifier), 类型: \(type.rawValue), 价格: \(formatPrice(product))")
+            } else if product.productIdentifier.contains("import") {
+                // 记录到的导入类产品
+                print("发现导入类产品: \(product.productIdentifier)")
+            } else {
+                print("忽略未知类型产品: \(product.productIdentifier)")
+            }
+        }
+        
+        // 更新产品列表
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // 记录更新前后的产品数量
+            let oldCount = self.availableProducts.count
+            self.availableProducts = subscriptionProducts
+            let newCount = self.availableProducts.count
+            print("🔄 更新订阅产品列表: 之前\(oldCount)个产品，现在\(newCount)个产品")
+            
+            // 记录所有找到的产品
+            if !self.availableProducts.isEmpty {
+                print("✅ 可用订阅产品列表:")
+                for (index, product) in self.availableProducts.enumerated() {
+                    print("  \(index+1). \(product.type.displayName) - \(product.localizedPrice)")
+                }
+            }
+            
+            self.isLoading = false
+            
+            if self.availableProducts.isEmpty {
+                // 提供更详细的错误信息
+                let testEnv = StoreKitConfiguration.shared.isTestEnvironment
+                if testEnv {
+                    self.errorMessage = "未找到可用的订阅产品。当前为沙盒环境，请确保产品已在App Store Connect正确配置并通过审核。"
+                    print("❌ 沙盒环境未找到任何订阅产品")
+                } else {
+                    self.errorMessage = "未找到可用的订阅产品，请检查网络连接或等待产品审核完成。"
+                    print("❌ 生产环境未找到任何订阅产品")
+                }
+            } else {
+                self.errorMessage = nil
+            }
+            
+            // 发送通知，通知UI更新
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionProductsUpdated"), object: nil)
+        }
+        
+        print("========== SubscriptionManager.processProducts 结束 ==========")
     }
     
     // MARK: - 公共方法
     
     /// 加载可用的订阅产品
     func loadProducts() {
-        isLoading = true
-        errorMessage = nil
+        print("========== SubscriptionManager.loadProducts 开始 ==========")
         
-        let productIds = Set([monthlyProductId, quarterlyProductId, halfYearlyProductId, yearlyProductId])
-        productRequest = SKProductsRequest(productIdentifiers: productIds)
-        productRequest?.delegate = self
-        productRequest?.start()
+        // 记录当前环境
+        let isTestEnvironment = StoreKitConfiguration.shared.isTestEnvironment
+        print("当前StoreKit环境: \(isTestEnvironment ? "沙盒测试环境" : "生产环境")")
+        
+        // 获取订阅产品ID列表 - 使用简化版产品ID
+        let subscriptionProductIds = productIdManager.allSimplifiedSubscriptionIds
+        
+        // 检查所有产品，调试模式下输出所有产品ID
+        print("所有产品ID: \(productIdManager.allProductIds.joined(separator: ", "))")
+        print("简化版订阅产品ID: \(subscriptionProductIds.joined(separator: ", "))")
+        
+        // 检查缓存产品
+        let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
+        print("缓存的所有产品数量: \(cachedProducts.count)")
+        
+        // 记录缓存中的订阅产品
+        let cachedSubscriptionProductIds = subscriptionProductIds.filter { cachedProducts[$0] != nil }
+        print("缓存中的订阅产品ID: \(cachedSubscriptionProductIds.joined(separator: ", "))")
+        
+        // 所有订阅产品都已缓存的情况
+        let allSubscriptionProductsCached = Set(cachedSubscriptionProductIds) == Set(subscriptionProductIds) && !subscriptionProductIds.isEmpty
+        print("所有订阅产品是否都已缓存: \(allSubscriptionProductsCached)")
+        
+        // 设置为加载中状态
+        isLoading = true
+        
+        // 如果所有订阅产品都已缓存，直接使用缓存
+        if allSubscriptionProductsCached {
+            print("使用缓存的订阅产品数据")
+            let cachedProducts = subscriptionProductIds.compactMap { StoreKitConfiguration.shared.getCachedProduct(productId: $0) }
+            processProducts(cachedProducts)
+            isLoading = false
+        } else {
+            // 否则发起请求，使用简化版产品ID
+            print("请求新的订阅产品信息(简化ID)")
+            let productIds = Set(subscriptionProductIds)
+            
+            // 添加更多错误处理
+            if productIds.isEmpty {
+                print("❌ 错误: 订阅产品ID列表为空")
+                self.errorMessage = "产品配置错误: 找不到订阅产品ID"
+                isLoading = false
+                return
+            }
+            
+            // 取消之前的请求
+            if productRequest != nil {
+                print("取消之前的产品请求")
+                productRequest?.cancel()
+                productRequest = nil
+            }
+            
+            // 创建新请求
+            productRequest = SKProductsRequest(productIdentifiers: productIds)
+            productRequest?.delegate = self
+            
+            // 添加请求超时处理
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+                guard let self = self else { return }
+                if self.isLoading {
+                    print("⚠️ 产品请求超时 (10秒)")
+                    self.isLoading = false
+                    self.errorMessage = "连接App Store超时，请检查网络连接"
+                    
+                    // 尝试使用任何可用的缓存产品
+                    if !self.availableProducts.isEmpty {
+                        print("使用现有产品数据")
+                    } else if !cachedProducts.isEmpty {
+                        print("尝试使用任何可用的缓存产品数据")
+                        let anyProducts = Array(cachedProducts.values)
+                        self.processProducts(anyProducts)
+                    }
+                }
+            }
+            
+            // 启动请求
+            productRequest?.start()
+            print("已发起SKProductsRequest请求，ID集合: \(productIds)")
+        }
+        print("========== SubscriptionManager.loadProducts 结束 ==========")
     }
     
     /// 购买订阅
@@ -119,7 +340,16 @@ class SubscriptionManager: NSObject, ObservableObject {
     ///   - productId: 产品ID
     ///   - completion: 完成回调
     func purchaseSubscription(productId: String, completion: @escaping (Result<SubscriptionType, Error>) -> Void) {
-        // 查找对应的产品
+        // 首先检查缓存中是否有此产品
+        if let cachedProduct = StoreKitConfiguration.shared.getCachedProduct(productId: productId) {
+            // 使用缓存的产品进行购买
+            purchaseCompletionHandler = completion
+            let payment = SKPayment(product: cachedProduct)
+            SKPaymentQueue.default().add(payment)
+            return
+        }
+        
+        // 如果缓存中没有，则查找当前加载的产品列表
         guard let product = availableProducts.first(where: { $0.id == productId })?.product else {
             completion(.failure(NSError(domain: "SubscriptionManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "找不到对应的产品"])))
             return
@@ -343,13 +573,13 @@ class SubscriptionManager: NSObject, ObservableObject {
     /// - Returns: 订阅类型
     private func subscriptionTypeForProductId(_ productId: String) -> SubscriptionType {
         switch productId {
-        case monthlyProductId:
+        case productIdManager.subscriptionMonthly:
             return .monthly
-        case quarterlyProductId:
+        case productIdManager.subscriptionQuarterly:
             return .quarterly
-        case halfYearlyProductId:
+        case productIdManager.subscriptionHalfYearly:
             return .halfYearly
-        case yearlyProductId:
+        case productIdManager.subscriptionYearly:
             return .yearly
         default:
             return .none
@@ -472,95 +702,176 @@ class SubscriptionManager: NSObject, ObservableObject {
         }
         print("========================================")
     }
+    
+    /// 添加这两个辅助方法到SubscriptionManager类中
+    private func formatPrice(_ product: SKProduct) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        
+        // 检查区域是否为中国
+        let regionCode = product.priceLocale.regionCode ?? Locale.current.regionCode ?? ""
+        
+        if regionCode == "CN" {
+            // 中国区域使用原始价格区域(人民币)
+            formatter.locale = product.priceLocale
+        } else {
+            // 非中国区域统一使用美元
+            formatter.locale = Locale(identifier: "en_US")
+            formatter.currencyCode = "USD"
+        }
+        
+        return formatter.string(from: product.price) ?? "\(product.price)"
+    }
+    
+    private func getPeriodText(for type: SubscriptionType) -> String {
+        switch type {
+        case .monthly:
+            return "按月"
+        case .quarterly:
+            return "按季度"
+        case .halfYearly:
+            return "半年"
+        case .yearly:
+            return "按年" 
+        case .none:
+            return ""
+        }
+    }
 }
 
 // MARK: - SKProductsRequestDelegate
 extension SubscriptionManager: SKProductsRequestDelegate {
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            self.isLoading = false
-            
-            // 检查是否有有效产品
-            if response.products.isEmpty {
-                self.errorMessage = "未找到可用的订阅产品"
-                return
-            }
-            
-            // 处理产品信息
-            var products: [SubscriptionProduct] = []
-            
-            for product in response.products {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .currency
-                
-                // 检查区域是否为中国
-                let regionCode = product.priceLocale.regionCode ?? Locale.current.regionCode ?? ""
-                
-                if regionCode == "CN" {
-                    // 中国区域使用原始价格区域(人民币)
-                    formatter.locale = product.priceLocale
-                } else {
-                    // 非中国区域统一使用美元
-                    formatter.locale = Locale(identifier: "en_US")
-                    formatter.currencyCode = "USD"
-                }
-                
-                guard let price = formatter.string(from: product.price) else { continue }
-                
-                var periodText = ""
-                switch product.productIdentifier {
-                case self.monthlyProductId:
-                    periodText = "按月"
-                    products.append(SubscriptionProduct(
-                        id: product.productIdentifier,
-                        type: .monthly,
-                        product: product,
-                        localizedPrice: price,
-                        localizedPeriod: periodText
-                    ))
-                case self.quarterlyProductId:
-                    periodText = "按季度"
-                    products.append(SubscriptionProduct(
-                        id: product.productIdentifier,
-                        type: .quarterly,
-                        product: product,
-                        localizedPrice: price,
-                        localizedPeriod: periodText
-                    ))
-                case self.halfYearlyProductId:
-                    periodText = "半年"
-                    products.append(SubscriptionProduct(
-                        id: product.productIdentifier,
-                        type: .halfYearly,
-                        product: product,
-                        localizedPrice: price,
-                        localizedPeriod: periodText
-                    ))
-                case self.yearlyProductId:
-                    periodText = "按年"
-                    products.append(SubscriptionProduct(
-                        id: product.productIdentifier,
-                        type: .yearly,
-                        product: product,
-                        localizedPrice: price,
-                        localizedPeriod: periodText
-                    ))
-                default:
-                    continue
-                }
-            }
-            
-            self.availableProducts = products
+        print("========== 收到App Store响应 ==========")
+        LogManager.shared.log("收到App Store产品响应", level: .info, category: "订阅")
+        
+        // 记录所有产品ID
+        print("请求的产品ID列表已收到响应")
+        
+        // 检查无效产品ID
+        if !response.invalidProductIdentifiers.isEmpty {
+            print("⚠️ 无效的产品ID (\(response.invalidProductIdentifiers.count)个): \(response.invalidProductIdentifiers.joined(separator: ", "))")
+            print("可能原因：1) 产品未在App Store Connect配置 2) 产品未通过审核 3) 产品ID拼写错误")
+            LogManager.shared.log("发现无效产品ID: \(response.invalidProductIdentifiers.joined(separator: ", "))", level: .warning, category: "订阅")
         }
+        
+        // 检查有效产品
+        if response.products.isEmpty {
+            print("❌ 未从App Store获取到任何有效产品")
+            LogManager.shared.log("未从App Store获取到任何有效产品", level: .error, category: "订阅")
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "无法从App Store获取产品信息，请检查网络连接或稍后再试"
+            }
+            return
+        }
+        
+        print("✅ 从App Store获取到\(response.products.count)个订阅类产品:")
+        for (index, product) in response.products.enumerated() {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.locale = product.priceLocale
+            let price = formatter.string(from: product.price) ?? "\(product.price)"
+            
+            print("  \(index+1). 产品ID: \(product.productIdentifier)")
+            print("     标题: \(product.localizedTitle)")
+            print("     价格: \(price)")
+            print("     本地化描述: \(product.localizedDescription)")
+        }
+        
+        // 处理产品
+        let filteredProducts = response.products.filter { product in
+            let isSubscription = self.productIdManager.allSubscriptionProductIds.contains(product.productIdentifier)
+            if !isSubscription {
+                print("⚠️ 忽略非订阅产品: \(product.productIdentifier)")
+            }
+            return isSubscription
+        }
+        
+        if filteredProducts.isEmpty {
+            print("❌ 筛选后没有可用的订阅产品")
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "未找到任何订阅产品"
+            }
+            return
+        }
+        
+        // 保存到StoreKit配置缓存中
+        for product in response.products {
+            StoreKitConfiguration.shared.getCachedProduct(productId: product.productIdentifier)
+        }
+        
+        // 处理产品
+        DispatchQueue.main.async {
+            self.processProducts(filteredProducts)
+            self.isLoading = false
+            self.errorMessage = nil
+            print("产品请求完成，状态: 成功")
+        }
+        
+        print("========== 产品请求处理完成 ==========")
     }
     
     func request(_ request: SKRequest, didFailWithError error: Error) {
-        DispatchQueue.main.async { [weak self] in
-            self?.isLoading = false
-            self?.errorMessage = "加载产品信息失败: \(error.localizedDescription)"
+        print("========== 产品请求失败 ==========")
+        print("❌ App Store产品请求失败: \(error.localizedDescription)")
+        LogManager.shared.log("App Store产品请求失败: \(error.localizedDescription)", level: .error, category: "订阅")
+        
+        if let skError = error as? SKError {
+            print("StoreKit错误代码: \(skError.code.rawValue)")
+            LogManager.shared.log("StoreKit错误代码: \(skError.code.rawValue)", level: .error, category: "订阅")
+            
+            // 提供更详细的错误信息和建议
+            switch skError.code {
+            case .unknown:
+                print("错误类型: 未知错误")
+                print("建议: 检查网络连接，重启应用后重试")
+            case .clientInvalid:
+                print("错误类型: 客户端无效")
+                print("建议: 用户可能需要登录iTunes Store账号")
+            case .paymentCancelled:
+                print("错误类型: 支付取消")
+            case .paymentInvalid:
+                print("错误类型: 支付无效")
+            case .paymentNotAllowed:
+                print("错误类型: 设备不允许支付")
+                print("建议: 检查设备限制设置，或使用其他设备")
+            case .storeProductNotAvailable:
+                print("错误类型: 产品不可用")
+                print("建议: 检查产品是否在当前区域/国家可用，产品是否已通过审核")
+            case .cloudServicePermissionDenied:
+                print("错误类型: 云服务权限被拒绝")
+            case .cloudServiceNetworkConnectionFailed:
+                print("错误类型: 云服务网络连接失败")
+                print("建议: 检查网络连接")
+            case .cloudServiceRevoked:
+                print("错误类型: 云服务已撤销")
+            default:
+                print("其他StoreKit错误: \(skError.code)")
+            }
         }
+        
+        DispatchQueue.main.async {
+            self.isLoading = false
+            self.errorMessage = "从App Store加载产品时出错: \(error.localizedDescription)"
+            
+            // 如果有缓存的产品，尝试使用缓存
+            let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
+            if !cachedProducts.isEmpty {
+                print("尝试使用缓存的产品数据")
+                let products = Array(cachedProducts.values)
+                self.processProducts(products)
+            }
+            
+            print("产品请求完成，状态: 失败")
+        }
+        
+        print("========== 产品请求处理完成 ==========")
+    }
+    
+    func requestDidFinish(_ request: SKRequest) {
+        print("App Store产品请求已完成")
     }
 }
 

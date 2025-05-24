@@ -168,3 +168,23 @@
 "purchase_success" = "购买成功";
 "purchased_import_count" = "已成功购买%d次导入机会";
 "please_login_first" = "请先登录再购买导入次数";
+
+/* About View */
+"about" = "关于";
+"app_tagline" = "您的智能朗读助手";
+"version" = "版本";
+"legal_info" = "法律信息";
+"privacy_policy" = "隐私政策";
+"terms_of_service" = "服务条款";
+"support" = "支持";
+"technical_support" = "技术支持";
+"send_feedback_email" = "发送反馈邮件";
+"developer_options" = "开发者选项";
+"view_logs" = "查看日志";
+"clear_logs" = "清除日志";
+"logs_cleared" = "日志已清除";
+"sandbox_environment" = "沙盒环境";
+"yes" = "是";
+"no" = "否";
+"developer_mode_enabled" = "开发者模式已启用";
+"developer_mode_disabled" = "开发者模式已禁用";

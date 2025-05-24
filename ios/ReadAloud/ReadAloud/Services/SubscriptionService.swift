@@ -51,7 +51,68 @@ class SubscriptionService: ObservableObject {
     
     /// 加载订阅产品
     func loadProducts() {
+        print("========== SubscriptionService.loadProducts 开始 ==========")
+        
+        // 清除旧的错误信息
+        errorMessage = nil
+        
+        // 检查环境
+        let isTestEnvironment = StoreKitConfiguration.shared.isTestEnvironment
+        print("当前StoreKit环境: \(isTestEnvironment ? "沙盒测试环境" : "生产环境")")
+        
+        // 检查是否有缓存的产品
+        let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
+        let subscriptionProductIds = ProductIdManager.shared.allSubscriptionProductIds
+        print("缓存的产品总数: \(cachedProducts.count)")
+        print("订阅产品ID列表: \(subscriptionProductIds.joined(separator: ", "))")
+        
+        // 检查缓存中有多少订阅产品
+        let cachedSubscriptionProducts = subscriptionProductIds.compactMap { cachedProducts[$0] }
+        print("缓存中的订阅产品数: \(cachedSubscriptionProducts.count)")
+        
+        // 调用订阅管理器加载产品
+        print("正在请求最新的订阅产品...")
         subscriptionManager.loadProducts()
+        
+        // 添加日志监控追踪App Store API请求结果
+        print("设置App Store产品获取超时监控...")
+        
+        // 在所有环境中，如果3秒后仍然没有产品，发送通知
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self = self else { return }
+            
+            if self.products.isEmpty && !self.isLoading {
+                print("⚠️ 3秒后仍未获取到产品，可能存在网络问题或产品配置问题")
+                print("缓存产品数量: \(StoreKitConfiguration.shared.getAllCachedProducts().count)")
+                print("订阅管理器产品数量: \(self.subscriptionManager.availableProducts.count)")
+                
+                // 检查收据状态
+                if let receiptURL = Bundle.main.appStoreReceiptURL,
+                   let receiptData = try? Data(contentsOf: receiptURL) {
+                    print("收据数据存在，长度: \(receiptData.count)")
+                } else {
+                    print("❌ 无法获取App Store收据")
+                }
+                
+                // 构建详细的错误信息
+                var errorInfo = "无法从App Store获取产品信息"
+                if isTestEnvironment {
+                    errorInfo += "，请检查沙盒环境配置"
+                } else {
+                    errorInfo += "，请检查网络连接或产品配置"
+                }
+                self.errorMessage = errorInfo
+                
+                // 发送通知，通知UI更新
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("SubscriptionProductsUpdated"),
+                    object: nil,
+                    userInfo: ["error": errorInfo]
+                )
+            }
+        }
+        
+        print("========== SubscriptionService.loadProducts 结束 ==========")
     }
     
     /// 购买订阅

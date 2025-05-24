@@ -74,9 +74,6 @@
             ReferencedContainer = "container:ReadAloud.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <StoreKitConfigurationFileReference
-         identifier = "../../ReadAloud/StoreKitProducts.storekit">
-      </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
