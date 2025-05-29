@@ -25,6 +25,11 @@ class StoreKitConfiguration: NSObject {
     // 当前正在处理的请求
     private var currentRequest: SKProductsRequest?
     
+    // 添加错误重试机制
+    private var retryCount = 0
+    private let maxRetryCount = 3
+    private var lastErrorTime: Date?
+    
     /// 初始化
     private override init() {
         // 使用收据URL判断环境，确保Xcode和TestFlight环境一致
@@ -49,10 +54,38 @@ class StoreKitConfiguration: NSObject {
         super.init()
         
         setupStoreKit()
+        
+        // 添加StoreKit交易观察者
+        #if DEBUG
+        print("🔄 [StoreKit] 在DEBUG模式下添加交易观察者")
+        #endif
+        
+        // 添加对StoreKit通知的观察
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStoreKitNotification(_:)),
+            name: NSNotification.Name("SKPaymentTransactionFinish"),
+            object: nil
+        )
     }
     
     deinit {
         invalidateTimeoutTimer()
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    /// 处理StoreKit通知
+    @objc private func handleStoreKitNotification(_ notification: Notification) {
+        if notification.name.rawValue == "SKPaymentTransactionFinish" {
+            print("🔄 [StoreKit] 收到恢复购买完成通知")
+            // 如果有错误，记录错误
+            if let error = notification.userInfo?["error"] as? Error {
+                print("❌ [StoreKit] 恢复购买完成但有错误: \(error.localizedDescription)")
+                LogManager.shared.logIAP("恢复购买错误", level: .error, details: error.localizedDescription)
+            } else {
+                print("✅ [StoreKit] 恢复购买完成，无错误")
+            }
+        }
     }
     
     /// 设置StoreKit
@@ -72,6 +105,25 @@ class StoreKitConfiguration: NSObject {
             print("🔄 [StoreKit] 正在使用StoreKit生产环境")
             LogManager.shared.log("使用StoreKit生产环境", level: .info, category: "StoreKit")
         }
+        
+        // 添加App Store信息消息错误处理
+        #if os(iOS)
+        // 添加全局异常处理，捕获StoreKit相关的消息错误
+        if #available(iOS 15.0, *) {
+            print("🔄 [StoreKit] 配置处理App Store消息错误")
+            Task {
+                do {
+                    // 这里不需要实际处理任何消息，我们只是让系统知道我们正在关注这些消息
+                    // 这样可以防止系统记录错误，比如HTTP 410错误
+                    for await _ in StoreKit.Message.messages {
+                        // 只需保持监听
+                    }
+                } catch {
+                    print("⚠️ [StoreKit] 消息监听出错: \(error.localizedDescription)")
+                }
+            }
+        }
+        #endif
     }
     
     /// 设置请求超时计时器
@@ -211,6 +263,54 @@ class StoreKitConfiguration: NSObject {
         
         // 重新加载产品
         preloadProducts()
+    }
+    
+    /// 处理AMSErrorDomain错误
+    /// - Parameter error: 原始错误
+    /// - Returns: 是否成功处理了错误
+    func handleAMSError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        
+        // 检查是否为AMSErrorDomain错误
+        if nsError.domain != "AMSErrorDomain" {
+            return false
+        }
+        
+        print("🔄 [StoreKit] 处理AMSErrorDomain错误: \(nsError.code)")
+        
+        // 处理HTTP 410 Gone错误
+        if nsError.code == 301 && (nsError.userInfo["AMSStatusCode"] as? Int) == 410 {
+            print("🔄 [StoreKit] 检测到HTTP 410 Gone错误 - 这通常是App Store Connect配置问题")
+            LogManager.shared.logIAP("检测到App Store消息端点不可用(HTTP 410)", level: .warning)
+            
+            // 这个错误不影响核心功能，只是消息inbox服务不可用
+            print("🔄 [StoreKit] 此错误不影响主要购买功能，继续处理...")
+            
+            // 如果是iOS 15或更高版本，尝试注册Message监听器
+            if #available(iOS 15.0, *) {
+                Task {
+                    do {
+                        // 防止多次注册，使用一个静态标记
+                        // 尝试注册消息监听器，这样系统就知道我们正在处理消息
+                        for await _ in StoreKit.Message.messages {
+                            // 只是监听，不需要实际处理
+                        }
+                    } catch {
+                        print("⚠️ [StoreKit] 消息监听出错: \(error.localizedDescription)")
+                    }
+                }
+            }
+            
+            return true
+        }
+        
+        // 处理其他AMSErrorDomain错误
+        print("⚠️ [StoreKit] 未处理的AMSErrorDomain错误: \(nsError.code)")
+        if let statusCode = nsError.userInfo["AMSStatusCode"] as? Int {
+            print("⚠️ [StoreKit] HTTP状态码: \(statusCode)")
+        }
+        
+        return false
     }
     
     /// 预加载所有产品信息 - 仅供强制刷新时使用
@@ -383,6 +483,9 @@ extension StoreKitConfiguration: SKProductsRequestDelegate {
         // 取消超时计时器
         invalidateTimeoutTimer()
         
+        // 重置重试计数
+        retryCount = 0
+        
         // 清除当前请求引用
         if currentRequest === request {
             currentRequest = nil
@@ -545,6 +648,27 @@ extension StoreKitConfiguration: SKProductsRequestDelegate {
         print("❌ [StoreKit] 错误描述: \(error.localizedDescription)")
         print("❌ [StoreKit] 错误详情: \(error)")
         
+        // 特别处理HTTP 410错误
+        let nsError = error as NSError
+        let isGoneError = nsError.domain == "AMSErrorDomain" && nsError.code == 301 && 
+                         (nsError.userInfo["AMSStatusCode"] as? Int) == 410
+        
+        if isGoneError {
+            print("🔄 [StoreKit] 检测到HTTP 410 Gone错误 - 这通常是App Store Connect配置问题")
+            LogManager.shared.logIAP("检测到App Store消息端点不可用(HTTP 410)", level: .warning)
+            
+            // 这个错误通常不影响实际购买功能，只是警告信息
+            print("🔄 [StoreKit] 此错误不影响主要购买功能，继续处理...")
+            
+            // 不要因为这个错误而影响产品加载流程
+            if isSimplifiedRequest {
+                let fullIds = Set(productIdManager.allSubscriptionProductIds)
+                self.requestProducts(identifiers: fullIds, isSimplified: false)
+            }
+            
+            return
+        }
+        
         // 记录错误详情到日志
         LogManager.shared.logIAP("产品请求失败", 
                                level: .error,
@@ -607,6 +731,31 @@ extension StoreKitConfiguration: SKProductsRequestDelegate {
         print("  2. 确认产品ID是否正确配置在App Store Connect")
         print("  3. 确认沙盒测试账号设置正确")
         print("  4. 确认应用Bundle ID与App Store Connect匹配")
+        
+        // 实现错误重试逻辑
+        if retryCount < maxRetryCount {
+            retryCount += 1
+            
+            // 计算重试延迟（指数退避）
+            let delay = pow(Double(2), Double(retryCount - 1))
+            
+            print("🔄 [StoreKit] 请求失败，进行第\(retryCount)次重试，延迟\(delay)秒...")
+            LogManager.shared.logIAP("产品请求失败，进行第\(retryCount)次重试", level: .warning)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                print("🔄 [StoreKit] 开始第\(self.retryCount)次重试...")
+                
+                if isSimplifiedRequest {
+                    let simplifiedIds = Set(self.productIdManager.allSimplifiedSubscriptionIds)
+                    self.requestProducts(identifiers: simplifiedIds, isSimplified: true)
+                } else {
+                    let fullIds = Set(self.productIdManager.allSubscriptionProductIds)
+                    self.requestProducts(identifiers: fullIds, isSimplified: false)
+                }
+            }
+            return
+        }
         
         // 如果是简化ID请求失败，尝试使用完整ID
         if isSimplifiedRequest {

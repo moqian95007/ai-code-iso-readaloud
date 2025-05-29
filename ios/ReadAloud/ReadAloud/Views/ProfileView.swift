@@ -12,6 +12,12 @@ struct ProfileView: View {
     @State private var refreshView: Bool = false  // 添加刷新触发器
     @State private var showLoginAlert: Bool = false // 添加登录提示弹窗状态
     @State private var isShowingAbout: Bool = false // 添加关于页面状态
+    @State private var showDeleteAccountAlert: Bool = false // 添加删除账户确认弹窗状态
+    @State private var deleteAccountMessage: String = "" // 添加删除账户操作的消息
+    @State private var showDeleteAccountResultAlert: Bool = false // 添加删除账户结果弹窗状态
+    @State private var deleteAccountSuccess: Bool = false // 添加删除账户操作结果状态
+    @State private var isShowingAccountSettings: Bool = false // 添加账号设置状态
+    @State private var isLoggingOut = false
     
     // 语言管理器
     @ObservedObject private var languageManager = LanguageManager.shared
@@ -184,6 +190,30 @@ struct ProfileView: View {
                         .padding(.vertical, 8)
                     }
                     
+                    // 添加账号设置选项
+                    if userManager.isLoggedIn {
+                        Button(action: {
+                            isShowingAccountSettings = true
+                        }) {
+                            HStack {
+                                Image(systemName: "person.text.rectangle")
+                                    .foregroundColor(.blue)
+                                    .frame(width: 30)
+                                
+                                Text("account_settings".localized)
+                                    .foregroundColor(.blue)
+                                    .padding(.leading, 5)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
+                    
                     // 添加关于我们选项
                     Button(action: {
                         isShowingAbout = true
@@ -208,7 +238,15 @@ struct ProfileView: View {
                     if userManager.isLoggedIn {
                         // 退出登录按钮
                         Button(action: {
-                            userManager.logout()
+                            isLoggingOut = true
+                            // 延迟一下再执行退出登录，以显示加载界面
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                userManager.logout()
+                                // 给一些时间显示加载界面，然后隐藏
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    isLoggingOut = false
+                                }
+                            }
                         }) {
                             HStack {
                                 Image(systemName: "arrow.right.square")
@@ -259,6 +297,26 @@ struct ProfileView: View {
             } message: {
                 Text("login_required_message".localized)
             }
+            // 添加删除账户确认弹窗
+            .alert("delete_account_confirm_title".localized, isPresented: $showDeleteAccountAlert) {
+                Button("delete".localized, role: .destructive) {
+                    // 调用删除账户方法
+                    userManager.deleteAccount { success, message in
+                        self.deleteAccountSuccess = success
+                        self.deleteAccountMessage = message ?? (success ? "delete_account_success".localized : "delete_account_failed".localized)
+                        self.showDeleteAccountResultAlert = true
+                    }
+                }
+                Button("cancel".localized, role: .cancel) {}
+            } message: {
+                Text("delete_account_confirm_message".localized)
+            }
+            // 添加删除账户结果弹窗
+            .alert(deleteAccountSuccess ? "success".localized : "error".localized, isPresented: $showDeleteAccountResultAlert) {
+                Button("ok".localized, role: .cancel) {}
+            } message: {
+                Text(deleteAccountMessage)
+            }
         }
         .sheet(isPresented: $isShowingLogin) {
             LoginView(isPresented: $isShowingLogin)
@@ -275,6 +333,34 @@ struct ProfileView: View {
         .sheet(isPresented: $isShowingAbout) {
             AboutView(isPresented: $isShowingAbout)
         }
+        .sheet(isPresented: $isShowingAccountSettings) {
+            AccountSettingsView(showDeleteAccountAlert: $showDeleteAccountAlert)
+        }
+        .overlay(
+            // 退出登录加载覆盖层
+            ZStack {
+                if isLoggingOut {
+                    Color.black.opacity(0.7)
+                        .edgesIgnoringSafeArea(.all)
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        
+                        Text("syncing_data".localized)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(30)
+                    .background(Color(.systemBackground).opacity(0.2))
+                    .cornerRadius(20)
+                    .shadow(radius: 15)
+                }
+            }
+            .animation(.easeInOut, value: isLoggingOut)
+        )
     }
     
     // 设置行
@@ -294,6 +380,37 @@ struct ProfileView: View {
                 .foregroundColor(.gray)
         }
         .padding(.vertical, 8)
+    }
+}
+
+// 账号设置视图
+struct AccountSettingsView: View {
+    @Binding var showDeleteAccountAlert: Bool
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        List {
+            // 删除账户按钮
+            Button(action: {
+                showDeleteAccountAlert = true
+                presentationMode.wrappedValue.dismiss() // 关闭当前视图以显示弹窗
+            }) {
+                HStack {
+                    Image(systemName: "person.crop.circle.badge.minus")
+                        .foregroundColor(.red)
+                        .frame(width: 30)
+                    
+                    Text("delete_account".localized)
+                        .foregroundColor(.red)
+                        .padding(.leading, 5)
+                    
+                    Spacer()
+                }
+                .padding(.vertical, 8)
+            }
+        }
+        .listStyle(InsetGroupedListStyle())
+        .navigationBarTitle("account_settings".localized, displayMode: .inline)
     }
 }
 

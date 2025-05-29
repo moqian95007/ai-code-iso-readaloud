@@ -87,6 +87,10 @@ class SubscriptionManager: NSObject, ObservableObject {
     // 添加交易ID跟踪集合
     private var processedTransactionIds = Set<String>()
     
+    // 添加重试机制
+    private var loadingRetryCount = 0
+    private let maxLoadingRetryCount = 3
+    
     // 初始化
     private override init() {
         super.init()
@@ -158,52 +162,45 @@ class SubscriptionManager: NSObject, ObservableObject {
         }
         
         for product in skProducts {
-            // 判断产品ID是否为订阅产品
-            if product.productIdentifier.contains("subscription") {
-                // 解析订阅类型
-                var type: SubscriptionType = .none
-                switch product.productIdentifier {
-                case productIdManager.subscriptionMonthly:
-                    type = .monthly
-                    print("找到月度订阅产品: \(product.localizedTitle)")
-                case productIdManager.subscriptionQuarterly:
-                    type = .quarterly
-                    print("找到季度订阅产品: \(product.localizedTitle)")
-                case productIdManager.subscriptionHalfYearly:
-                    type = .halfYearly
-                    print("找到半年订阅产品: \(product.localizedTitle)")
-                case productIdManager.subscriptionYearly:
-                    type = .yearly
-                    print("找到年度订阅产品: \(product.localizedTitle)")
-                default:
-                    print("忽略未知订阅产品: \(product.productIdentifier)")
-                    continue
-                }
-                
-                // 验证产品价格信息
-                if product.price.doubleValue <= 0 {
-                    print("⚠️ 产品价格异常: \(product.price.doubleValue)")
-                    continue
-                }
-                
-                // 创建SubscriptionProduct对象
-                let subscriptionProduct = SubscriptionProduct(
-                    id: product.productIdentifier,
-                    type: type,
-                    product: product,
-                    localizedPrice: formatPrice(product),
-                    localizedPeriod: getPeriodText(for: type)
-                )
-                
-                // 添加到产品列表
-                subscriptionProducts.append(subscriptionProduct)
-                print("成功添加产品: \(product.productIdentifier), 类型: \(type.rawValue), 价格: \(formatPrice(product))")
-            } else if product.productIdentifier.contains("import") {
-                // 记录到的导入类产品
-                print("发现导入类产品: \(product.productIdentifier)")
-            } else {
-                print("忽略未知类型产品: \(product.productIdentifier)")
+            // 简化订阅类型判断，直接通过产品ID确定类型
+            var type: SubscriptionType = .none
+            
+            switch product.productIdentifier {
+            case "monthly":
+                type = .monthly
+                print("找到月度订阅产品: \(product.localizedTitle)")
+            case "quarterly":
+                type = .quarterly
+                print("找到季度订阅产品: \(product.localizedTitle)")
+            case "halfYearly":
+                type = .halfYearly
+                print("找到半年订阅产品: \(product.localizedTitle)")
+            case "Yearly":
+                type = .yearly
+                print("找到年度订阅产品: \(product.localizedTitle)")
+            default:
+                print("忽略未知产品: \(product.productIdentifier)")
+                continue
             }
+            
+            // 验证产品价格信息
+            if product.price.doubleValue <= 0 {
+                print("⚠️ 产品价格异常: \(product.price.doubleValue)")
+                continue
+            }
+            
+            // 创建SubscriptionProduct对象
+            let subscriptionProduct = SubscriptionProduct(
+                id: product.productIdentifier,
+                type: type,
+                product: product,
+                localizedPrice: formatPrice(product),
+                localizedPeriod: getPeriodText(for: type)
+            )
+            
+            // 添加到产品列表
+            subscriptionProducts.append(subscriptionProduct)
+            print("成功添加产品: \(product.productIdentifier), 类型: \(type.rawValue), 价格: \(formatPrice(product))")
         }
         
         // 更新产品列表
@@ -253,15 +250,16 @@ class SubscriptionManager: NSObject, ObservableObject {
     func loadProducts() {
         print("========== SubscriptionManager.loadProducts 开始 ==========")
         
+        // 重置重试计数
+        loadingRetryCount = 0
+        
         // 记录当前环境
         let isTestEnvironment = StoreKitConfiguration.shared.isTestEnvironment
         print("当前StoreKit环境: \(isTestEnvironment ? "沙盒测试环境" : "生产环境")")
         
-        // 获取订阅产品ID列表 - 使用简化版产品ID
-        let subscriptionProductIds = productIdManager.allSimplifiedSubscriptionIds
+        // 直接使用四种简化ID
+        let subscriptionProductIds = ["quarterly", "monthly", "Yearly", "halfYearly"]
         
-        // 检查所有产品，调试模式下输出所有产品ID
-        print("所有产品ID: \(productIdManager.allProductIds.joined(separator: ", "))")
         print("简化版订阅产品ID: \(subscriptionProductIds.joined(separator: ", "))")
         
         // 检查缓存产品
@@ -315,6 +313,15 @@ class SubscriptionManager: NSObject, ObservableObject {
                 if self.isLoading {
                     print("⚠️ 产品请求超时 (10秒)")
                     self.isLoading = false
+                    
+                    // 检查是否需要重试
+                    if self.loadingRetryCount < self.maxLoadingRetryCount {
+                        self.loadingRetryCount += 1
+                        print("🔄 重试加载产品 (\(self.loadingRetryCount)/\(self.maxLoadingRetryCount))")
+                        self.loadProducts()
+                        return
+                    }
+                    
                     self.errorMessage = "连接App Store超时，请检查网络连接"
                     
                     // 尝试使用任何可用的缓存产品
@@ -372,7 +379,14 @@ class SubscriptionManager: NSObject, ObservableObject {
             case .success(let type):
                 completion(.success(type))
             case .failure(let error):
-                completion(.failure(error))
+                // 处理AMS错误
+                if StoreKitConfiguration.shared.handleAMSError(error) {
+                    // 如果AMS错误被成功处理，仍然返回成功
+                    print("🔄 AMS错误被处理，继续恢复购买流程")
+                    completion(.success(nil))
+                } else {
+                    completion(.failure(error))
+                }
             }
         }
         
@@ -573,13 +587,13 @@ class SubscriptionManager: NSObject, ObservableObject {
     /// - Returns: 订阅类型
     private func subscriptionTypeForProductId(_ productId: String) -> SubscriptionType {
         switch productId {
-        case productIdManager.subscriptionMonthly:
+        case "monthly":
             return .monthly
-        case productIdManager.subscriptionQuarterly:
+        case "quarterly":
             return .quarterly
-        case productIdManager.subscriptionHalfYearly:
+        case "halfYearly":
             return .halfYearly
-        case productIdManager.subscriptionYearly:
+        case "Yearly":
             return .yearly
         default:
             return .none
@@ -779,32 +793,14 @@ extension SubscriptionManager: SKProductsRequestDelegate {
             print("     本地化描述: \(product.localizedDescription)")
         }
         
-        // 处理产品
-        let filteredProducts = response.products.filter { product in
-            let isSubscription = self.productIdManager.allSubscriptionProductIds.contains(product.productIdentifier)
-            if !isSubscription {
-                print("⚠️ 忽略非订阅产品: \(product.productIdentifier)")
-            }
-            return isSubscription
-        }
-        
-        if filteredProducts.isEmpty {
-            print("❌ 筛选后没有可用的订阅产品")
-            DispatchQueue.main.async {
-                self.isLoading = false
-                self.errorMessage = "未找到任何订阅产品"
-            }
-            return
-        }
-        
         // 保存到StoreKit配置缓存中
         for product in response.products {
             StoreKitConfiguration.shared.getCachedProduct(productId: product.productIdentifier)
         }
         
-        // 处理产品
+        // 处理产品 - 不需要再次过滤，直接处理所有产品
         DispatchQueue.main.async {
-            self.processProducts(filteredProducts)
+            self.processProducts(response.products)
             self.isLoading = false
             self.errorMessage = nil
             print("产品请求完成，状态: 成功")
@@ -1040,17 +1036,34 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
     }
     
     private func handleFailedTransaction(_ transaction: SKPaymentTransaction) {
-        if let error = transaction.error as? SKError {
-            if error.code != .paymentCancelled {
+        let error = transaction.error ?? NSError(domain: "SubscriptionManager", code: 6, userInfo: [NSLocalizedDescriptionKey: "购买失败"])
+        
+        // 检查是否为AMSErrorDomain错误，如果是并且能处理，则不视为真正的错误
+        if StoreKitConfiguration.shared.handleAMSError(error) {
+            print("🔄 检测到并处理了AMS错误，继续购买流程")
+            
+            // 我们不将这种错误报告给用户，只是完成交易
+            SKPaymentQueue.default().finishTransaction(transaction)
+            
+            // 可能的处理方式：重新加载产品或者刷新UI
+            DispatchQueue.main.async { [weak self] in
+                self?.loadProducts()
+            }
+            
+            return
+        }
+        
+        if let skError = error as? SKError {
+            if skError.code != .paymentCancelled {
                 // 真正的错误
-                purchaseCompletionHandler?(.failure(error))
+                purchaseCompletionHandler?(.failure(skError))
             } else {
                 // 用户取消
                 purchaseCompletionHandler?(.failure(NSError(domain: "SubscriptionManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "用户取消了购买"])))
             }
         } else {
             // 其他错误
-            purchaseCompletionHandler?(.failure(transaction.error ?? NSError(domain: "SubscriptionManager", code: 6, userInfo: [NSLocalizedDescriptionKey: "购买失败"])))
+            purchaseCompletionHandler?(.failure(error))
         }
         
         purchaseCompletionHandler = nil
@@ -1092,6 +1105,23 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
     func paymentQueue(_ queue: SKPaymentQueue, restoreCompletedTransactionsFailedWithError error: Error) {
         print("========== 恢复购买失败 ==========")
         print("错误描述: \(error.localizedDescription)")
+        
+        // 检查是否为AMSErrorDomain错误，如果是并且能处理，则不视为真正的错误
+        if StoreKitConfiguration.shared.handleAMSError(error) {
+            print("🔄 检测到并处理了AMS错误，继续恢复购买流程")
+            
+            // 我们不将这种错误报告给用户，而是尝试继续恢复流程
+            // 对于没有找到有效订阅的情况，我们返回一个空的成功结果
+            purchaseCompletionHandler?(.success(.none))
+            purchaseCompletionHandler = nil
+            
+            // 通知UI更新
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            }
+            
+            return
+        }
         
         if let skError = error as? SKError {
             print("错误代码: \(skError.code.rawValue)")

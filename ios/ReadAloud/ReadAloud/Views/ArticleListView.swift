@@ -50,6 +50,8 @@ struct ArticleListView: View {
                 listSelectorMenu
             }
         }
+        // 减少navigationTitle的影响，确保内容从顶部开始
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAddSheet) {
             AddArticleView(articleManager: articleManager, listManager: listManager, isPresented: $showingAddSheet)
         }
@@ -209,26 +211,28 @@ struct ArticleListView: View {
         let filteredArticles = filterArticles(articleManager.articles)
         
         return VStack(spacing: 0) {
-            // 显示当前选中列表的名称和文章数量
-            HStack {
-                Text("articles_count".localized(with: listManager.selectedList?.name ?? "reading_list".localized, filteredArticles.count))
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-                
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.top, 2)
-            .padding(.bottom, 5)
-            
             // 文章列表
             List {
-                ForEach(filteredArticles) { article in
-                    // 根据是否处于编辑模式显示不同的行
-                    if isEditMode {
-                        articleEditRow(for: article)
-                    } else {
-                        articleRow(for: article)
+                // 在列表顶部添加文章数量信息，而不是作为单独的视图
+                Section(header: 
+                    HStack {
+                        Text("articles_count".localized(with: listManager.selectedList?.name ?? "reading_list".localized, filteredArticles.count))
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                        
+                        Spacer()
+                    }
+                    .padding(.vertical, 2)
+                    .listRowInsets(EdgeInsets())
+                    .background(Color.clear)
+                ) {
+                    ForEach(filteredArticles) { article in
+                        // 根据是否处于编辑模式显示不同的行
+                        if isEditMode {
+                            articleEditRow(for: article)
+                        } else {
+                            articleRow(for: article)
+                        }
                     }
                 }
             }

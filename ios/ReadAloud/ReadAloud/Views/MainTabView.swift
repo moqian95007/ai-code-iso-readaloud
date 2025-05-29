@@ -47,6 +47,8 @@ struct MainTabView: View {
                 // 文章列表页面
                 NavigationView {
                     ArticleListView(articleManager: articleManager)
+                        .navigationBarTitleDisplayMode(.inline) // 确保标题紧凑显示
+                        .edgesIgnoringSafeArea(.top) // 忽略顶部安全区域
                 }
                 .navigationViewStyle(StackNavigationViewStyle())
                 .tabItem {

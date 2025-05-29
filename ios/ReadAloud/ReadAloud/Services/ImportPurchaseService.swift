@@ -119,23 +119,35 @@ class ImportPurchaseService: NSObject, ObservableObject {
         print("⏱️ 开始处理获取到的导入类产品，共\(skProducts.count)个")
         
         for product in skProducts {
-            // 只处理消耗型产品
-            if product.productIdentifier.contains("import") && importCountsMap[product.productIdentifier] != nil {
-                if let count = importCountsMap[product.productIdentifier] {
-                    print("找到导入产品: \(product.localizedTitle) (导入\(count)次)")
-                    
-                    importProducts.append(ImportProduct(
-                        id: product.productIdentifier,
-                        count: count,
-                        product: product
-                    ))
-                }
-            } else if product.productIdentifier.contains("subscription") {
-                // 记录到的订阅类产品
-                print("发现订阅类产品: \(product.productIdentifier)")
-            } else {
-                print("忽略未知类型产品: \(product.productIdentifier)")
+            // 简化导入次数判断逻辑
+            var count: Int = 0
+            
+            // 直接根据产品ID判断
+            switch product.productIdentifier {
+            case "import.single":
+                count = 1
+                print("找到单次导入产品: \(product.localizedTitle)")
+            case "import.three":
+                count = 3
+                print("找到三次导入产品: \(product.localizedTitle)")
+            case "import.five":
+                count = 5
+                print("找到五次导入产品: \(product.localizedTitle)")
+            case "import.ten":
+                count = 10
+                print("找到十次导入产品: \(product.localizedTitle)")
+            default:
+                print("忽略未知产品: \(product.productIdentifier)")
+                continue
             }
+            
+            importProducts.append(ImportProduct(
+                id: product.productIdentifier,
+                count: count,
+                product: product
+            ))
+            
+            print("成功添加产品: \(product.productIdentifier), 导入次数: \(count)")
         }
         
         // 更新产品列表
@@ -178,8 +190,8 @@ class ImportPurchaseService: NSObject, ObservableObject {
         // 先检查StoreKitConfiguration中是否已有缓存的产品
         let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
         
-        // 使用简化版的产品ID
-        let importProductIds = productIdManager.allSimplifiedConsumableIds
+        // 直接使用四种简化导入产品ID
+        let importProductIds = ["import.single", "import.three", "import.five", "import.ten"]
         
         // 检查是否所有产品都已在缓存中
         let allProductsCached = importProductIds.allSatisfy { cachedProducts[$0] != nil }
@@ -321,8 +333,20 @@ extension ImportPurchaseService: SKPaymentTransactionObserver {
     private func handlePurchasedTransaction(_ transaction: SKPaymentTransaction) {
         let productId = transaction.payment.productIdentifier
         
-        // 获取对应的导入次数
-        guard let importCount = importCountsMap[productId] else {
+        // 简化获取导入次数逻辑
+        var importCount: Int
+        
+        // 直接根据产品ID判断次数
+        switch productId {
+        case "import.single":
+            importCount = 1
+        case "import.three":
+            importCount = 3
+        case "import.five":
+            importCount = 5
+        case "import.ten":
+            importCount = 10
+        default:
             // 未找到对应的导入次数，完成交易并报错
             SKPaymentQueue.default().finishTransaction(transaction)
             

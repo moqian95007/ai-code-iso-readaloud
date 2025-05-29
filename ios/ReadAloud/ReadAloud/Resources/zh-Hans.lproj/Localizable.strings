@@ -126,7 +126,7 @@
 "pro_member" = "PRO会员";
 "pro_member_features" = "解锁全部高级功能，畅享语音朗读";
 "pro_features" = "会员特权";
-"unlimited_articles" = "无限文章";
+"unlimited_articles" = "无限导入";
 "unlimited_articles_desc" = "不限数量导入文档和文章";
 "current_plan" = "当前会员: ";
 "valid_until" = "有效期至: ";
@@ -165,6 +165,7 @@
 "loading_products" = "加载产品中...";
 "purchase_note" = "购买说明";
 "import_purchase_details" = "• 购买的导入次数用于导入本地文档\n• 导入次数没有使用期限\n• PRO会员无需消耗导入次数";
+"syncing_data" = "正在同步数据，请稍候...";
 "purchase_success" = "购买成功";
 "purchased_import_count" = "已成功购买%d次导入机会";
 "please_login_first" = "请先登录再购买导入次数";
@@ -188,3 +189,15 @@
 "no" = "否";
 "developer_mode_enabled" = "开发者模式已启用";
 "developer_mode_disabled" = "开发者模式已禁用";
+
+/* Delete Account */
+"delete_account" = "删除账户";
+"delete_account_confirm_title" = "确认删除账户";
+"delete_account_confirm_message" = "删除账户后，所有与您账户相关的数据将被永久删除，且无法恢复。确定要继续吗？";
+"delete_account_success" = "账户已成功删除";
+"delete_account_failed" = "删除账户失败";
+"success" = "成功";
+"error" = "错误";
+
+/* Account Settings */
+"account_settings" = "账号设置";

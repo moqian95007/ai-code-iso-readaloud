@@ -126,7 +126,7 @@
 "pro_member" = "PRO Member";
 "pro_member_features" = "Unlock premium features, enjoy voice reading";
 "pro_features" = "PRO Features";
-"unlimited_articles" = "Unlimited Articles";
+"unlimited_articles" = "Unlimited Imports";
 "unlimited_articles_desc" = "Import unlimited documents and articles";
 "current_plan" = "Current Plan: ";
 "valid_until" = "Valid Until: ";
@@ -188,3 +188,15 @@
 "no" = "No";
 "developer_mode_enabled" = "Developer Mode Enabled";
 "developer_mode_disabled" = "Developer Mode Disabled";
+
+/* Delete Account */
+"delete_account" = "Delete Account";
+"delete_account_confirm_title" = "Confirm Account Deletion";
+"delete_account_confirm_message" = "After deleting your account, all data associated with your account will be permanently deleted and cannot be recovered. Are you sure you want to continue?";
+"delete_account_success" = "Account successfully deleted";
+"delete_account_failed" = "Failed to delete account";
+"success" = "Success";
+"error" = "Error";
+
+/* Account Settings */
+"account_settings" = "Account Settings";

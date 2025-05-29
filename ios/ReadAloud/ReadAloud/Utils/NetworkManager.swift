@@ -475,6 +475,44 @@ class NetworkManager {
         return request(endpoint: endpoint, method: method, parameters: parameters)
     }
     
+    /// 删除用户账户
+    /// - Parameters:
+    ///   - userId: 用户ID
+    ///   - token: 用户令牌
+    /// - Returns: 包含响应消息的Publisher
+    func deleteUser(userId: Int, token: String) -> AnyPublisher<APIResponseMessage, NetworkError> {
+        let parameters: [String: Any] = [
+            "user_id": userId,
+            "token": token
+        ]
+        
+        print("请求删除用户账户 - userId: \(userId)")
+        
+        return request(endpoint: "/delete_user.php", method: "POST", parameters: parameters)
+            .decode(type: APIResponseMessage.self, decoder: createDateFormattedDecoder())
+            .mapError { error -> NetworkError in
+                if let decodingError = error as? DecodingError {
+                    print("解码错误: \(decodingError)")
+                    return .decodingError(decodingError)
+                } else if let networkError = error as? NetworkError {
+                    return networkError
+                } else {
+                    print("未知错误: \(error)")
+                    return .networkError(error)
+                }
+            }
+            .catch { [weak self] error -> AnyPublisher<APIResponseMessage, NetworkError> in
+                // 如果遇到网络错误且尚未使用备用URL，尝试使用备用URL
+                if case NetworkError.networkError(_) = error, let self = self, !self.useBackupURL {
+                    print("主URL失败，尝试使用备用URL")
+                    self.useBackupURL = true
+                    return self.deleteUser(userId: userId, token: token)
+                }
+                return Fail(error: error).eraseToAnyPublisher()
+            }
+            .eraseToAnyPublisher()
+    }
+    
     // MARK: - 私有辅助方法
     
     /// 通用网络请求方法
@@ -688,4 +726,10 @@ struct APIResponse<T: Codable>: Codable {
     let status: String
     let message: String?
     let data: T?
+}
+
+/// 简单的API响应消息结构
+struct APIResponseMessage: Codable {
+    let status: String
+    let message: String
 }

@@ -30,6 +30,12 @@ class UserManager: ObservableObject {
     private init() {
         // 从UserDefaults加载用户信息
         loadUserFromStorage()
+        
+        // 如果用户已登录，立即从远程刷新用户信息
+        if isLoggedIn, let user = currentUser, user.isTokenValid {
+            print("用户已登录，正在从远程刷新用户信息 - 用户ID: \(user.id)")
+            refreshUserStatus()
+        }
     }
     
     // MARK: - 第三方登录方法
@@ -456,14 +462,15 @@ class UserManager: ObservableObject {
     }
     
     /// 用户登出
-    func logout() {
+    /// - Parameter skipDataSync: 是否跳过数据同步，默认为false。当删除账户后退出时，应设为true
+    func logout(skipDataSync: Bool = false) {
         print("========= 开始用户登出流程 =========")
         
         // 保存当前用户ID用于清除订阅数据
         let currentUserId = currentUser?.id
         
-        // 先同步本地数据到远程服务器
-        if let user = currentUser, user.id > 0, let token = user.token {
+        // 先同步本地数据到远程服务器，除非指定跳过
+        if !skipDataSync, let user = currentUser, user.id > 0, let token = user.token {
             print("登出前先同步本地数据到远程服务器")
             
             // 创建一个信号量来等待同步完成
@@ -498,6 +505,8 @@ class UserManager: ObservableObject {
             } else {
                 print("数据同步等待超时，继续登出流程")
             }
+        } else if skipDataSync {
+            print("跳过数据同步，直接继续登出流程")
         }
         
         // 清除用户数据
@@ -648,9 +657,12 @@ class UserManager: ObservableObject {
         
         // 4. 同步导入文档数量
         syncGroup.enter()
-        syncRemoteImportCountToLocal(user: user)
-        // 由于syncRemoteImportCountToLocal是异步操作，我们需要等待一段时间再离开组
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        syncRemoteImportCountToLocal(user: user) { success in
+            if success {
+                print("成功从远程同步导入次数")
+            } else {
+                print("从远程获取导入次数失败")
+            }
             syncGroup.leave()
         }
         
@@ -1367,9 +1379,15 @@ class UserManager: ObservableObject {
     }
     
     /// 从远程同步用户导入数量
-    /// - Parameter user: 用户对象
-    func syncRemoteImportCountToLocal(user: User) {
-        guard user.isTokenValid && user.id > 0, let token = user.token else { return }
+    /// - Parameters:
+    ///   - user: 用户对象
+    ///   - completion: 完成回调，返回操作是否成功
+    func syncRemoteImportCountToLocal(user: User, completion: ((Bool) -> Void)? = nil) {
+        guard user.isTokenValid && user.id > 0, let token = user.token else {
+            print("同步导入次数失败: 用户令牌无效")
+            completion?(false)
+            return
+        }
         
         // 获取远程保存的导入数量
         NetworkManager.shared.getUserData(userId: user.id, token: token, dataKey: "remaining_import_count")
@@ -1378,6 +1396,7 @@ class UserManager: ObservableObject {
                 receiveCompletion: { completionStatus in
                     if case .failure(let error) = completionStatus {
                         print("从远程获取导入数量失败: \(error)")
+                        completion?(false)
                     }
                 },
                 receiveValue: { [weak self] responseData in
@@ -1389,7 +1408,13 @@ class UserManager: ObservableObject {
                             self?.currentUser = currentUser
                             self?.saveUserToStorage(user: currentUser)
                             print("成功从远程同步导入数量: \(count)")
+                            completion?(true)
+                        } else {
+                            completion?(false)
                         }
+                    } else {
+                        print("未从远程获取到导入数量数据")
+                        completion?(false)
                     }
                 }
             )
@@ -1412,9 +1437,12 @@ class UserManager: ObservableObject {
         // 创建一个组来追踪所有同步任务
         let syncGroup = DispatchGroup()
         
-        // 1. 同步订阅状态
+        // 1. 同步订阅状态 - 从远程获取
         syncGroup.enter()
         DispatchQueue.main.async {
+            // 清除本地订阅数据，重新加载
+            SubscriptionRepository.shared.clearSubscriptions(for: user.id)
+            // 从服务器加载订阅数据
             SubscriptionRepository.shared.loadSubscriptionsForUser(user.id)
             // 由于loadSubscriptionsForUser是异步操作，给它一点时间完成
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -1422,11 +1450,21 @@ class UserManager: ObservableObject {
             }
         }
         
-        // 2. 同步剩余导入数量
+        // 2. 同步剩余导入数量 - 从远程获取
         syncGroup.enter()
-        self.syncRemoteImportCountToLocal(user: user)
-        // 由于syncRemoteImportCountToLocal是异步操作，给它一点时间完成
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        syncRemoteImportCountToLocal(user: user) { success in
+            if success {
+                print("成功从远程获取导入次数")
+            } else {
+                print("从远程获取导入次数失败")
+            }
+            syncGroup.leave()
+        }
+        
+        // 3. 同步用户文章列表和文章数据 - 从远程获取
+        syncGroup.enter()
+        syncRemoteDataToLocal(user: user) {
+            print("已从远程同步用户数据到本地")
             syncGroup.leave()
         }
         
@@ -1436,8 +1474,50 @@ class UserManager: ObservableObject {
             
             // 发送通知以更新界面显示
             NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+            NotificationCenter.default.post(name: Notification.Name("ReloadArticlesData"), object: nil)
             
             completion?()
         }
+    }
+    
+    // MARK: - 账户删除
+    
+    /// 删除当前用户账户
+    /// - Parameter completion: 操作完成的回调，接收一个布尔值表示操作是否成功
+    func deleteAccount(completion: @escaping (Bool, String?) -> Void) {
+        guard let user = currentUser, user.id > 0, let token = user.token else {
+            completion(false, "用户未登录或令牌无效")
+            return
+        }
+        
+        isLoading = true
+        error = nil
+        
+        NetworkManager.shared.deleteUser(userId: user.id, token: token)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] completionStatus in
+                    self?.isLoading = false
+                    if case .failure(let error) = completionStatus {
+                        if case NetworkError.apiError(let message) = error {
+                            self?.error = message
+                            print("删除账户失败: \(message)")
+                            completion(false, message)
+                        } else {
+                            let errorMsg = "删除账户失败，请稍后再试"
+                            self?.error = errorMsg
+                            print("删除账户错误: \(error)")
+                            completion(false, errorMsg)
+                        }
+                    }
+                },
+                receiveValue: { [weak self] response in
+                    // 删除账户成功，执行退出登录流程，跳过数据同步
+                    print("删除账户成功，开始清理本地数据")
+                    self?.logout(skipDataSync: true)
+                    completion(true, response.message)
+                }
+            )
+            .store(in: &cancellables)
     }
 } 
