@@ -22,6 +22,9 @@ class ThemeManager: ObservableObject {
     func toggleDarkMode() {
         isDarkMode.toggle()
         UserDefaults.standard.set(isDarkMode, forKey: UserDefaultsKeys.isDarkMode)
+        
+        // 发送通知，通知设置已更新
+        NotificationCenter.default.post(name: NSNotification.Name("UserSettingsUpdated"), object: nil)
     }
     
     // 切换到下一个字体大小选项
@@ -29,6 +32,9 @@ class ThemeManager: ObservableObject {
         fontSizeOption = fontSizeOption.next()
         fontSize = fontSizeOption.size
         fontSizeOption.saveToUserDefaults()
+        
+        // 发送通知，通知设置已更新
+        NotificationCenter.default.post(name: NSNotification.Name("UserSettingsUpdated"), object: nil)
     }
     
     // 获取背景颜色
@@ -50,7 +56,7 @@ class ThemeManager: ObservableObject {
         }
     }
     
-    // 获取高亮背景颜色 - 增强版
+    // 获取高亮背景颜色 - 播放状态版本
     func highlightBackgroundColor(isHighlighted: Bool, isPlayingHighlight: Bool = true) -> Color {
         if isHighlighted {
             if isPlayingHighlight {
@@ -60,6 +66,16 @@ class ThemeManager: ObservableObject {
                 // 恢复状态下使用蓝色高亮
                 return isDarkMode ? Color.blue.opacity(0.2) : Color.blue.opacity(0.15)
             }
+        } else {
+            return Color.clear
+        }
+    }
+    
+    // 获取高亮背景颜色 - 增强版
+    func enhancedHighlightBackgroundColor(isHighlighted: Bool, range: Double) -> Color {
+        if isHighlighted {
+            let opacity = range * 0.5 + 0.2 // 范围从0.2到0.7
+            return isDarkMode ? Color.yellow.opacity(opacity) : Color.yellow.opacity(opacity * 0.75)
         } else {
             return Color.clear
         }

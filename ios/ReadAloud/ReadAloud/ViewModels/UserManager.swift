@@ -86,6 +86,17 @@ class UserManager: ObservableObject {
                             // 发送通知通知所有ArticleManager实例重新加载文章数据
                             NotificationCenter.default.post(name: Notification.Name("ReloadArticlesData"), object: nil)
                         }
+                        
+                        // 获取用户设置和阅读进度 - 只有订阅会员才获取
+                        if user.hasActiveSubscription {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                // 使用SyncService同步用户设置和阅读进度
+                                print("用户有活跃订阅，开始获取用户设置和阅读进度")
+                                SyncService.shared.fetchAll()
+                            }
+                        } else {
+                            print("用户无活跃订阅，跳过获取用户设置和阅读进度")
+                        }
                     }
                 }
             )
@@ -139,6 +150,17 @@ class UserManager: ObservableObject {
                         self?.syncLocalDataToRemote(user: user) {
                             // 发送通知通知所有ArticleManager实例重新加载文章数据
                             NotificationCenter.default.post(name: Notification.Name("ReloadArticlesData"), object: nil)
+                        }
+                        
+                        // 获取用户设置和阅读进度 - 只有订阅会员才获取
+                        if user.hasActiveSubscription {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                // 使用SyncService同步用户设置和阅读进度
+                                print("用户有活跃订阅，开始获取用户设置和阅读进度")
+                                SyncService.shared.fetchAll()
+                            }
+                        } else {
+                            print("用户无活跃订阅，跳过获取用户设置和阅读进度")
                         }
                     }
                 }
@@ -348,43 +370,255 @@ class UserManager: ObservableObject {
             .store(in: &cancellables)
     }
     
-    /// 使用邮箱和密码登录
+    /// 登录用户
     /// - Parameters:
-    ///   - email: 邮箱
+    ///   - email: 用户邮箱
     ///   - password: 密码
     func login(email: String, password: String) {
         isLoading = true
         error = nil
         
-        NetworkManager.shared.login(email: email, password: password)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    self?.isLoading = false
-                    if case .failure(let error) = completion {
-                        if case NetworkError.apiError(let message) = error {
-                            self?.error = message
+        // 打印日志
+        print("开始登录请求 - 邮箱: \(email)")
+        
+        // 使用URLSession执行网络请求
+        let loginUrl = URL(string: "https://readaloud.imoqian.cn/api/login.php")!
+        var request = URLRequest(url: loginUrl)
+        request.httpMethod = "POST"
+        
+        // 尝试两种方式发送请求
+        let useJSONFormat = true
+        
+        if useJSONFormat {
+            // 使用JSON格式
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            let jsonParams = ["email": email, "password": password]
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: jsonParams, options: [])
+                request.httpBody = jsonData
+                
+                // 打印请求详情
+                print("登录请求URL: \(loginUrl)")
+                print("登录请求体(JSON): \(String(data: jsonData, encoding: .utf8) ?? "")")
+            } catch {
+                print("JSON序列化失败: \(error)")
+                self.error = "请求准备失败"
+                self.isLoading = false
+                return
+            }
                         } else {
-                            self?.error = "登录失败，请稍后再试"
-                        }
-                    }
-                },
-                receiveValue: { [weak self] user in
-                    self?.currentUser = user
-                    self?.isLoggedIn = true
-                    self?.saveUserToStorage(user: user)
-                    
-                    // 登录成功后，先从远程同步数据到本地，然后再同步本地数据到远程
-                    self?.syncRemoteDataToLocal(user: user) { [weak self] in
-                        // 完成从远程同步后，再同步本地数据到远程
-                        self?.syncLocalDataToRemote(user: user) {
-                            // 发送通知通知所有ArticleManager实例重新加载文章数据
-                            NotificationCenter.default.post(name: Notification.Name("ReloadArticlesData"), object: nil)
-                        }
-                    }
+            // 使用表单格式
+            request.addValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            
+            // 构建请求体
+            let postString = "email=\(email)&password=\(password)"
+            request.httpBody = postString.data(using: .utf8)
+            
+            // 打印请求详情
+            print("登录请求URL: \(loginUrl)")
+            print("登录请求体(表单): \(postString)")
+        }
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            // 打印响应信息
+            if let httpResponse = response as? HTTPURLResponse {
+                print("登录响应状态码: \(httpResponse.statusCode)")
+                print("登录响应头: \(httpResponse.allHeaderFields)")
+            }
+            
+            DispatchQueue.main.async {
+                self.isLoading = false
+                
+                if let error = error {
+                    print("登录网络错误: \(error.localizedDescription)")
+                    self.error = "网络错误: \(error.localizedDescription)"
+                    return
                 }
-            )
-            .store(in: &cancellables)
+                
+                guard let data = data else {
+                    print("登录响应数据为空")
+                    self.error = "无法获取数据"
+                    return
+                }
+                
+                // 打印原始响应数据
+                if let responseString = String(data: data, encoding: .utf8) {
+                    print("登录原始响应: \(responseString)")
+                }
+                
+                // 解析响应
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                        print("登录JSON响应: \(json)")
+                        
+                        // 检查新版API的status字段
+                        if let status = json["status"] as? String, status == "success" {
+                            print("登录成功 - 状态: \(status)")
+                            // 新版API中，用户数据在data字段中
+                            if let userData = json["data"] as? [String: Any],
+                               let id = userData["id"] as? Int,
+                               let username = userData["username"] as? String,
+                               let email = userData["email"] as? String,
+                               let status = userData["status"] as? String,
+                               let token = userData["token"] as? String {
+                                
+                                print("成功获取用户数据 - ID: \(id), 用户名: \(username), 邮箱: \(email)")
+                                
+                                // 可选字段
+                                let phone = userData["phone"] as? String
+                                let registerDateStr = userData["register_date"] as? String
+                                let lastLoginStr = userData["last_login"] as? String
+                                let remainingImportCount = userData["remaining_import_count"] as? Int ?? 1
+                                
+                                // 解析日期
+                                let dateFormatter = ISO8601DateFormatter()
+                                dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                                
+                                var registerDate: Date? = nil
+                                if let dateStr = registerDateStr {
+                                    registerDate = dateFormatter.date(from: dateStr)
+                                }
+                                
+                                var lastLogin: Date? = nil
+                                if let dateStr = lastLoginStr {
+                                    lastLogin = dateFormatter.date(from: dateStr)
+                                }
+                                
+                                // 创建用户对象
+                                let user = User(
+                                    id: id,
+                                    username: username,
+                                    email: email,
+                                    phone: phone,
+                                    token: token,
+                                    registerDate: registerDate,
+                                    lastLogin: lastLogin,
+                                    status: status,
+                                    remainingImportCount: remainingImportCount
+                                )
+                                
+                                // 保存用户信息
+                                self.currentUser = user
+                                self.isLoggedIn = true
+                                self.saveUserToStorage(user: user)
+                    
+                                // 从远程同步用户数据
+                                print("开始从远程同步用户数据")
+                                self.syncRemoteDataToLocal(user: user)
+                                
+                                // 获取用户设置和阅读进度
+                                // 添加短暂延迟，确保用户信息已完全保存
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    // 使用SyncService同步用户设置和阅读进度 - 只有订阅会员才获取
+                                    if user.hasActiveSubscription {
+                                        print("用户有活跃订阅，开始获取用户设置和阅读进度")
+                                        SyncService.shared.fetchAll()
+                                    } else {
+                                        print("用户无活跃订阅，跳过获取用户设置和阅读进度")
+                                    }
+                                }
+                                
+                                print("用户登录成功: \(username)")
+                            } else {
+                                print("登录成功但解析用户数据失败")
+                                self.error = "解析用户数据失败"
+                            }
+                        } 
+                        // 兼容旧版API的success字段
+                        else if let success = json["success"] as? Bool, success {
+                            print("登录成功标志: \(success)")
+                            // 旧版API中，用户数据在user字段中
+                            if let userData = json["user"] as? [String: Any],
+                               let id = userData["id"] as? Int,
+                               let username = userData["username"] as? String,
+                               let email = userData["email"] as? String,
+                               let status = userData["status"] as? String,
+                               let token = userData["token"] as? String {
+                                
+                                print("成功获取用户数据 - ID: \(id), 用户名: \(username), 邮箱: \(email)")
+                                
+                                // 可选字段
+                                let phone = userData["phone"] as? String
+                                let registerDateStr = userData["register_date"] as? String
+                                let lastLoginStr = userData["last_login"] as? String
+                                let remainingImportCount = userData["remaining_import_count"] as? Int ?? 1
+                                
+                                // 解析日期
+                                let dateFormatter = ISO8601DateFormatter()
+                                dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                                
+                                var registerDate: Date? = nil
+                                if let dateStr = registerDateStr {
+                                    registerDate = dateFormatter.date(from: dateStr)
+                                }
+                                
+                                var lastLogin: Date? = nil
+                                if let dateStr = lastLoginStr {
+                                    lastLogin = dateFormatter.date(from: dateStr)
+                                }
+                                
+                                // 创建用户对象
+                                let user = User(
+                                    id: id,
+                                    username: username,
+                                    email: email,
+                                    phone: phone,
+                                    token: token,
+                                    registerDate: registerDate,
+                                    lastLogin: lastLogin,
+                                    status: status,
+                                    remainingImportCount: remainingImportCount
+                                )
+                                
+                                // 保存用户信息
+                                self.currentUser = user
+                                self.isLoggedIn = true
+                                self.saveUserToStorage(user: user)
+                                
+                                // 从远程同步用户数据
+                                print("开始从远程同步用户数据")
+                                self.syncRemoteDataToLocal(user: user)
+                                
+                                // 获取用户设置和阅读进度
+                                // 添加短暂延迟，确保用户信息已完全保存
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    // 使用SyncService同步用户设置和阅读进度 - 只有订阅会员才获取
+                                    if user.hasActiveSubscription {
+                                        print("用户有活跃订阅，开始获取用户设置和阅读进度")
+                                        SyncService.shared.fetchAll()
+                                    } else {
+                                        print("用户无活跃订阅，跳过获取用户设置和阅读进度")
+                                    }
+                                }
+                                
+                                print("用户登录成功: \(username)")
+                            } else {
+                                print("登录成功但解析用户数据失败")
+                                self.error = "解析用户数据失败"
+                        }
+                        } else if let message = json["message"] as? String {
+                            print("登录失败 - 服务器消息: \(message)")
+                            self.error = message
+                        } else if let status = json["status"] as? String, status == "error", 
+                              let message = json["message"] as? String {
+                            print("登录失败 - 服务器错误: \(message)")
+                            self.error = message
+                        } else {
+                            print("登录失败 - 未知原因")
+                            self.error = "登录失败，请检查邮箱和密码"
+                        }
+                    } else {
+                        print("登录响应不是有效的JSON")
+                        self.error = "解析响应失败"
+                    }
+                } catch {
+                    print("登录响应解析异常: \(error.localizedDescription)")
+                    self.error = "处理响应失败: \(error.localizedDescription)"
+                }
+            }
+        }.resume()
     }
     
     /// 发送验证码
@@ -473,22 +707,51 @@ class UserManager: ObservableObject {
         if !skipDataSync, let user = currentUser, user.id > 0, let token = user.token {
             print("登出前先同步本地数据到远程服务器")
             
+            // 主动保存当前阅读进度
+            print("正在保存最新阅读进度...")
+            
+            // 保存SpeechManager中当前正在播放文章的进度
+            if let currentArticle = SpeechManager.shared.getCurrentArticle() {
+                print("保存当前播放文章的进度: \(currentArticle.title)")
+                SpeechManager.shared.forceSyncProgress()
+            } else {
+                print("当前没有正在播放的文章")
+            }
+            
+            // 等待短暂时间确保进度保存完成
+            Thread.sleep(forTimeInterval: 0.5)
+            
             // 创建一个信号量来等待同步完成
             let syncSemaphore = DispatchSemaphore(value: 0)
             
             // 创建一个同步组来追踪所有同步任务
             let syncGroup = DispatchGroup()
             
-            // 同步文章列表到远程
+            // 同步用户设置和阅读进度到远程
             syncGroup.enter()
-            syncArticleLists(userId: user.id, token: token) {
+            print("正在同步用户设置和阅读进度...")
+            SyncService.shared.syncAll { success in
+                print("用户设置和阅读进度同步完成，结果: \(success ? "成功" : "失败")")
                 syncGroup.leave()
             }
             
-            // 同步文章内容到远程
-            syncGroup.enter()
-            syncArticles(userId: user.id, token: token) {
-                syncGroup.leave()
+            // 只有订阅会员才同步文章列表和文章内容
+            if user.hasActiveSubscription {
+                print("用户有活跃订阅，同步文章列表和内容")
+                
+                // 同步文章列表到远程
+                syncGroup.enter()
+                syncArticleLists(userId: user.id, token: token) {
+                    syncGroup.leave()
+                }
+                
+                // 同步文章内容到远程
+                syncGroup.enter()
+                syncArticles(userId: user.id, token: token) {
+                    syncGroup.leave()
+                }
+            } else {
+                print("用户无活跃订阅，跳过同步文章列表和内容")
             }
             
             // 当所有同步任务完成后，发送信号
@@ -497,8 +760,8 @@ class UserManager: ObservableObject {
                 syncSemaphore.signal()
             }
             
-            // 限制最多等待5秒钟
-            let waitResult = syncSemaphore.wait(timeout: .now() + 5.0)
+            // 限制最多等待7秒钟
+            let waitResult = syncSemaphore.wait(timeout: .now() + 7.0)
             
             if waitResult == .success {
                 print("登出前数据同步已完成，继续登出流程")
@@ -649,13 +912,7 @@ class UserManager: ObservableObject {
             }
         }
         
-        // 3. 同步文章数据
-        syncGroup.enter()
-        syncRemoteArticlesToLocal(userId: user.id, token: token) {
-            syncGroup.leave()
-        }
-        
-        // 4. 同步导入文档数量
+        // 3. 同步导入文档数量 - 所有用户都同步
         syncGroup.enter()
         syncRemoteImportCountToLocal(user: user) { success in
             if success {
@@ -666,10 +923,23 @@ class UserManager: ObservableObject {
             syncGroup.leave()
         }
         
-        // 5. 同步文章列表
+        // 以下数据只有订阅会员才同步
+        if user.hasActiveSubscription {
+            print("用户有活跃订阅，将同步所有数据")
+            
+            // 4. 同步文章数据 - 仅限订阅会员
+            syncGroup.enter()
+            syncRemoteArticlesToLocal(userId: user.id, token: token) {
+                syncGroup.leave()
+            }
+            
+            // 5. 同步文章列表 - 仅限订阅会员
         syncGroup.enter()
         syncRemoteArticleListsToLocal(userId: user.id, token: token) {
             syncGroup.leave()
+            }
+        } else {
+            print("用户无活跃订阅，仅同步基本数据")
         }
         
         // 当所有任务完成后调用completion
@@ -848,16 +1118,23 @@ class UserManager: ObservableObject {
         // 创建一个同步组来追踪所有同步任务
         let syncGroup = DispatchGroup()
         
+        // 只有订阅会员才能同步文章列表和文章内容到远程
+        if user.hasActiveSubscription {
+            print("用户有活跃订阅，将同步所有数据到远程")
+        
         // 同步文章列表
         syncGroup.enter()
         syncArticleLists(userId: user.id, token: token) {
             syncGroup.leave()
         }
         
-        // 只同步文章内容
+            // 同步文章内容
         syncGroup.enter()
         syncArticles(userId: user.id, token: token) {
             syncGroup.leave()
+            }
+        } else {
+            print("用户无活跃订阅，跳过同步文章数据到远程")
         }
         
         // 不再同步文档库，文档数据体积过大

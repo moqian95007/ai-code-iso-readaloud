@@ -192,6 +192,9 @@ struct SubscriptionView: View {
             
             VStack(spacing: 15) {
                 featureRow(icon: "books.vertical.fill", title: "unlimited_articles".localized, subtitle: "unlimited_articles_desc".localized)
+                featureRow(icon: "iphone.and.arrow.forward", title: "sync_across_devices".localized, subtitle: "sync_across_devices_desc".localized)
+                featureRow(icon: "icloud.fill", title: "cloud_backup".localized, subtitle: "cloud_backup_desc".localized)
+                featureRow(icon: "star.fill", title: "more_features_coming".localized, subtitle: "more_features_coming_desc".localized)
             }
             .padding(.horizontal, 5)
         }

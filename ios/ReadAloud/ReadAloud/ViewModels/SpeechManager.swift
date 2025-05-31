@@ -1483,9 +1483,49 @@ class SpeechManager: ObservableObject {
             UserDefaults.standard.set(currentProgress, forKey: UserDefaultsKeys.lastProgress(for: articleId))
             UserDefaults.standard.set(currentTime, forKey: UserDefaultsKeys.lastPlaybackTime(for: articleId))
             UserDefaults.standard.set(isPlaying, forKey: UserDefaultsKeys.wasPlaying(for: articleId))
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: UserDefaultsKeys.lastPlayTime(for: articleId))
             
             // 移除文档进度同步逻辑，避免频繁操作导致的卡顿
             // 注意：文档进度将只在应用退出和定时自动保存时更新
+            
+            // 通知阅读进度已更新，以便同步服务可以同步这些更改
+            // 使用防抖动逻辑，避免频繁发送通知
+            debounceProgressNotification()
+        }
+    }
+    
+    // 阅读进度通知防抖动
+    private var lastProgressNotificationTime: Date? = nil
+    private func debounceProgressNotification(force: Bool = false) {
+        let now = Date()
+        
+        // 如果强制发送通知，则忽略时间限制
+        if force {
+            // 更新最后通知时间
+            lastProgressNotificationTime = now
+            
+            // 强制发送通知
+            NotificationCenter.default.post(name: NSNotification.Name("ReadingProgressUpdated"), object: nil)
+            
+            if let articleId = currentArticle?.id {
+                print("强制发送阅读进度更新通知 - 文章ID: \(articleId.uuidString), 进度: \(Int(currentProgress * 100))%")
+            }
+            return
+        }
+        
+        // 常规防抖动逻辑
+        // 如果30秒内发送过通知，则跳过
+        if let lastTime = lastProgressNotificationTime, now.timeIntervalSince(lastTime) < 30 {
+            return
+        }
+        
+        // 更新最后通知时间
+        lastProgressNotificationTime = now
+        
+        // 在常规播放中不发送通知，仅在退出和登出时发送
+        // 这样我们可以大幅减少服务器同步
+        if let articleId = currentArticle?.id {
+            print("保存本地阅读进度 - 文章ID: \(articleId.uuidString), 进度: \(Int(currentProgress * 100))%")
         }
     }
     
@@ -2018,5 +2058,33 @@ class SpeechManager: ObservableObject {
         }
         
         return (currentTime, totalTime)
+    }
+    
+    // 发送进度更新通知
+    private func sendProgressUpdateNotification() {
+        // 不再在播放过程中发送阅读进度更新通知
+        // 仅保存本地进度，不触发同步
+        
+        // 更新最后通知时间，但不发送通知
+        lastProgressNotificationTime = Date()
+        
+        // 记录日志但不触发通知
+        if let articleId = currentArticle?.id {
+            print("保存本地阅读进度 - 文章ID: \(articleId.uuidString), 进度: \(Int(currentProgress * 100))%")
+        }
+    }
+    
+    // 强制同步当前进度 - 用于退出前确保同步最新进度
+    func forceSyncProgress() {
+        // 确保currentPlaybackPosition是最新的
+        currentPlaybackPosition = speechDelegate.highlightRange.location
+        
+        // 保存进度
+        savePlaybackProgress()
+        
+        // 强制发送通知
+        debounceProgressNotification(force: true)
+        
+        print("强制同步阅读进度完成")
     }
 }

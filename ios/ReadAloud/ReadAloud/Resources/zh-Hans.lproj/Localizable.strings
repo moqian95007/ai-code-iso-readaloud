@@ -128,6 +128,12 @@
 "pro_features" = "会员特权";
 "unlimited_articles" = "无限导入";
 "unlimited_articles_desc" = "不限数量导入文档和文章";
+"sync_across_devices" = "多设备同步";
+"sync_across_devices_desc" = "阅读进度、设置和文章在多设备间无缝同步";
+"cloud_backup" = "云端备份";
+"cloud_backup_desc" = "提供个人数据的云端备份和恢复功能";
+"more_features_coming" = "更多功能敬请期待";
+"more_features_coming_desc" = "我们将持续更新，为您带来更多专属功能";
 "current_plan" = "当前会员: ";
 "valid_until" = "有效期至: ";
 "manage_subscription" = "管理订阅";

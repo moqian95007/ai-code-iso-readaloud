@@ -128,6 +128,12 @@
 "pro_features" = "PRO Features";
 "unlimited_articles" = "Unlimited Imports";
 "unlimited_articles_desc" = "Import unlimited documents and articles";
+"sync_across_devices" = "Multi-device Sync";
+"sync_across_devices_desc" = "Seamlessly sync reading progress, settings and articles across devices";
+"cloud_backup" = "Cloud Backup";
+"cloud_backup_desc" = "Cloud backup and restore functionality for your personal data";
+"more_features_coming" = "More Features Coming Soon";
+"more_features_coming_desc" = "We continuously update with new exclusive features";
 "current_plan" = "Current Plan: ";
 "valid_until" = "Valid Until: ";
 "manage_subscription" = "Manage Subscription";

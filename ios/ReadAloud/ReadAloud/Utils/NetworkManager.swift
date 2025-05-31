@@ -178,6 +178,28 @@ class NetworkManager {
         }
         
         return request(endpoint: "/get_user_data.php", method: "POST", parameters: parameters)
+            .handleEvents(receiveOutput: { data in
+                if let responseString = String(data: data, encoding: .utf8) {
+                    print("获取用户数据原始响应: \(responseString)")
+                }
+            })
+            .tryMap { data -> Data in
+                // 尝试检测返回的是否为空数组
+                if let responseString = String(data: data, encoding: .utf8),
+                   responseString.contains("\"data\":[]") {
+                    // 创建一个包含空字典的响应
+                    let modifiedResponse = """
+                    {
+                        "status": "success",
+                        "message": null,
+                        "data": {}
+                    }
+                    """
+                    print("检测到空数组响应，转换为空字典")
+                    return modifiedResponse.data(using: .utf8) ?? data
+                }
+                return data
+            }
             .decode(type: APIResponse<[String: String]>.self, decoder: createDateFormattedDecoder())
             .mapError { error -> NetworkError in
                 if let decodingError = error as? DecodingError {
@@ -191,7 +213,8 @@ class NetworkManager {
                 }
             }
             .flatMap { response -> AnyPublisher<[String: String], NetworkError> in
-                if response.status == "success", let data = response.data {
+                if response.status == "success" {
+                    let data = response.data ?? [:]  // 如果data为nil，使用空字典
                     return Just(data)
                         .setFailureType(to: NetworkError.self)
                         .eraseToAnyPublisher()

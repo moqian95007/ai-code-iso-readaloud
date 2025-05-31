@@ -238,6 +238,11 @@ struct ArticleListView: View {
             }
             .listStyle(PlainListStyle())
             .environment(\.editMode, .constant(isEditMode ? .active : .inactive))
+            // 添加safeAreaInset确保顶部内容不被导航栏遮挡
+            .safeAreaInset(edge: .top) {
+                Color.clear.frame(height: 65)
+            }
+            .padding(.top, 5)  // 添加顶部内边距
             
             // 播放全部按钮，仅在非编辑模式下显示
             if !filteredArticles.isEmpty && !isEditMode {
