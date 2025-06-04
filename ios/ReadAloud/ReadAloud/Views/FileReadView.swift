@@ -359,26 +359,34 @@ struct ImportButton: View {
     // 获取UserManager实例
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var languageManager = LanguageManager.shared // 语言管理器
+    // 获取DocumentLibraryManager实例，用于检查已有文档数量
+    @ObservedObject private var documentLibrary = DocumentLibraryManager.shared
     
     var body: some View {
         Button(action: {
             print("点击了导入按钮")
             
-            // 检查用户是否登录
+            // 检查用户是否登录，如果未登录但已有文档，则要求登录
             if !userManager.isLoggedIn {
-                // 用户未登录，显示登录提示
-                showLoginAlert = true
-                return
+                // 检查未登录用户已导入的文档数量
+                if documentLibrary.documents.count >= 1 {
+                    // 未登录用户已有一个文档，显示登录提示
+                    showLoginAlert = true
+                    return
+                } else {
+                    // 未登录用户没有文档，允许导入一个
+                    print("未登录用户首次导入文档，允许操作")
+                }
+            } else {
+                // 用户已登录，检查是否有导入权限
+                if let user = userManager.currentUser, user.remainingImportCount <= 0 && !user.hasActiveSubscription {
+                    // 用户剩余导入次数为0且没有订阅会员，显示订阅提示
+                    showSubscriptionAlert = true
+                    return
+                }
             }
             
-            // 检查用户是否有导入权限
-            if let user = userManager.currentUser, user.remainingImportCount <= 0 && !user.hasActiveSubscription {
-                // 用户剩余导入次数为0且没有订阅会员，显示订阅提示
-                showSubscriptionAlert = true
-                return
-            }
-            
-            // 用户已登录且有导入权限，显示导入界面
+            // 用户有导入权限，显示导入界面
             // 立即显示导入中遮罩
             withAnimation {
                 isImporting = true
@@ -416,7 +424,7 @@ struct ImportButton: View {
                 showLoginView = true  // 直接显示登录视图
             }
         } message: {
-            Text("login_required_message".localized)
+            Text("free_import_limit_reached".localized)
         }
         // 使用confirmationDialog替代alert，支持多个按钮
         .confirmationDialog("导入次数已用完", isPresented: $showSubscriptionAlert, titleVisibility: .visible) {

@@ -23,6 +23,7 @@
 "document_invalid" = "文档选择无效";
 "document_empty" = "文档内容为空";
 "loading_chapters" = "加载章节中...";
+"free_import_limit_reached" = "未登录用户最多可导入1个文档，请登录后继续使用";
 
 /* Profile View */
 "login_register" = "登录/注册";

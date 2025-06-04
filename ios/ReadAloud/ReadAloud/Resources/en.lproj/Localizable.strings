@@ -23,6 +23,7 @@
 "document_invalid" = "Document selection invalid";
 "document_empty" = "Document content is empty";
 "loading_chapters" = "Loading chapters...";
+"free_import_limit_reached" = "Non-logged-in users can import at most 1 document. Please login to continue.";
 
 /* Profile View */
 "login_register" = "Login/Register";
