@@ -59,9 +59,52 @@ class SubscriptionChecker {
         // 监听用户状态变化
         userManager.$currentUser
             .sink { [weak self] user in
-                self?.hasPremiumAccess = user?.hasActiveSubscription ?? false
+                if let user = user {
+                    // 用户已登录，从用户信息获取订阅状态
+                    self?.hasPremiumAccess = user.hasActiveSubscription
+                } else {
+                    // 用户未登录，从UserDefaults获取订阅状态
+                    let status = UserDefaults.standard.bool(forKey: "guestHasPremiumAccess")
+                    self?.hasPremiumAccess = status
+                    
+                    // 检查tempSubscriptionInfo是否存在
+                    if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo") {
+                        if let endDateValue = subscriptionInfo["endDate"] as? TimeInterval {
+                            let endDate = Date(timeIntervalSince1970: endDateValue)
+                        }
+                    }
+                }
             }
             .store(in: &cancellables)
+            
+        // 检查是否有已保存的Guest订阅状态
+        if userManager.currentUser == nil {
+            let status = UserDefaults.standard.bool(forKey: "guestHasPremiumAccess")
+            hasPremiumAccess = status
+        }
+            
+        // 监听订阅状态更新通知
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("SubscriptionStatusUpdated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            if let user = self?.userManager.currentUser {
+                // 用户已登录，从用户信息更新订阅状态
+                self?.hasPremiumAccess = user.hasActiveSubscription
+            } else {
+                // 用户未登录，从UserDefaults更新订阅状态
+                let status = UserDefaults.standard.bool(forKey: "guestHasPremiumAccess")
+                self?.hasPremiumAccess = status
+                
+                // 检查tempSubscriptionInfo是否存在
+                if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo") {
+                    if let endDateValue = subscriptionInfo["endDate"] as? TimeInterval {
+                        let endDate = Date(timeIntervalSince1970: endDateValue)
+                    }
+                }
+            }
+        }
     }
     
     // 取消标记

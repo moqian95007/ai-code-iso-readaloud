@@ -34,36 +34,78 @@ struct SubscriptionView: View {
     var body: some View {
         NavigationView {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 0) {
                     // 顶部背景图和标题
                     headerView
                     
-                    // 会员特权介绍
-                    featuresView
-                    
-                    // 会员状态显示
-                    if let user = userManager.currentUser, user.hasActiveSubscription {
-                        activeSubscriptionView(user: user)
-                    } else {
-                        // 会员套餐选择
+                    VStack(spacing: 20) {
+                        // 会员特权介绍
+                        featuresView
+                        
+                        // 选择套餐标题
+                        Text("select_plan".localized)
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 10)
+                        
+                        // 会员状态显示
+                        if let user = userManager.currentUser, user.hasActiveSubscription {
+                            // 已登录用户且有活跃订阅
+                            activeSubscriptionView(user: user)
+                            
+                            // 添加分隔线
+                            Divider()
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                            
+                            // 添加续订或升级提示文本
+                            Text("renew_or_upgrade_subscription".localized)
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 5)
+                        } else if !userManager.isLoggedIn && SubscriptionChecker.shared.hasPremiumAccess {
+                            // 未登录用户但有活跃订阅
+                            anonymousActiveSubscriptionView()
+                            
+                            // 添加分隔线
+                            Divider()
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                            
+                            // 添加续订或升级提示文本
+                            Text("renew_or_upgrade_subscription".localized)
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 5)
+                            
+                            // 添加登录建议
+                            loginSuggestionView()
+                        }
+                        
+                        // 无论是否已订阅，都显示会员套餐选择
                         subscriptionOptionsView
+                        
+                        // 加载中提示
+                        if subscriptionService.isLoading || isPurchasing || isRestoring {
+                            loadingView
+                        }
+                        
+                        // 错误信息显示
+                        if let error = errorMessage, showError {
+                            errorView(message: error)
+                        }
+                        
+                        // 底部说明
+                        footerView
                     }
-                    
-                    // 加载中提示
-                    if subscriptionService.isLoading || isPurchasing || isRestoring {
-                        loadingView
-                    }
-                    
-                    // 错误信息显示
-                    if let error = errorMessage, showError {
-                        errorView(message: error)
-                    }
-                    
-                    // 底部说明
-                    footerView
+                    .padding(.top, 20)
+                    .padding(.bottom, 30)
                 }
-                .padding(.bottom, 30)
             }
+            .background(Color(UIColor.systemBackground))
             .navigationBarTitle(Text("subscribe_pro".localized), displayMode: .inline)
             .navigationBarItems(trailing: closeButton)
             .onAppear {
@@ -159,7 +201,7 @@ struct SubscriptionView: View {
             LinearGradient(gradient: Gradient(colors: gradientColors),
                            startPoint: .topLeading, endPoint: .bottomTrailing)
                 .frame(height: 180)
-                .cornerRadius(0)
+                .edgesIgnoringSafeArea(.top)
             
             // VIP图标和标题
             VStack(alignment: .leading, spacing: 5) {
@@ -190,7 +232,7 @@ struct SubscriptionView: View {
                 .font(.headline)
                 .padding(.horizontal, 20)
             
-            VStack(spacing: 15) {
+            VStack(spacing: 20) {
                 featureRow(icon: "books.vertical.fill", title: "unlimited_articles".localized, subtitle: "unlimited_articles_desc".localized)
                 featureRow(icon: "iphone.and.arrow.forward", title: "sync_across_devices".localized, subtitle: "sync_across_devices_desc".localized)
                 featureRow(icon: "icloud.fill", title: "cloud_backup".localized, subtitle: "cloud_backup_desc".localized)
@@ -198,11 +240,6 @@ struct SubscriptionView: View {
             }
             .padding(.horizontal, 5)
         }
-        .padding(.vertical, 15)
-        .background(Color(UIColor.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-        .padding(.horizontal, 20)
     }
     
     // 特权行
@@ -210,7 +247,7 @@ struct SubscriptionView: View {
         HStack(spacing: 15) {
             Image(systemName: icon)
                 .font(.system(size: 22))
-                .foregroundColor(gradientColors[0])
+                .foregroundColor(Color.purple)
                 .frame(width: 30, height: 30)
             
             VStack(alignment: .leading, spacing: 2) {
@@ -230,15 +267,22 @@ struct SubscriptionView: View {
     // 活跃订阅视图
     private func activeSubscriptionView(user: User) -> some View {
         VStack(spacing: 15) {
-            // 订阅信息
+            // 当前订阅信息标题
+            Text("current_subscription".localized)
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+            
+            // 订阅信息卡片
             HStack {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 24))
                     .foregroundColor(.green)
                 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("current_plan".localized + user.subscriptionType.simplifiedDisplayName)
+                    Text(user.subscriptionType.simplifiedDisplayName)
                         .font(.headline)
+                        .foregroundColor(.primary)
                     
                     if let endDate = user.subscriptionEndDate {
                         Text("valid_until".localized + formattedDate(endDate))
@@ -248,173 +292,57 @@ struct SubscriptionView: View {
                 }
                 
                 Spacer()
-            }
-            .padding()
-            .background(Color(UIColor.systemGray6))
-            .cornerRadius(10)
-            
-            // 管理订阅按钮
-            Button(action: {
-                if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-                    UIApplication.shared.open(url)
-                }
-            }) {
-                Text("manage_subscription".localized)
-                    .font(.headline)
+                
+                // 添加当前状态标签
+                Text("active".localized)
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Color.green)
                     .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(LinearGradient(gradient: Gradient(colors: gradientColors),
-                                               startPoint: .leading, endPoint: .trailing))
                     .cornerRadius(10)
             }
+            .padding()
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(12)
+            .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
     }
     
-    // 会员套餐选择
-    private var subscriptionOptionsView: some View {
+    // 未登录用户的活跃订阅视图
+    private func anonymousActiveSubscriptionView() -> some View {
         VStack(spacing: 15) {
-            // 标题
-            Text("select_plan".localized)
+            // 当前订阅信息标题
+            Text("current_subscription".localized)
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
             
-            if subscriptionService.products.isEmpty && !subscriptionService.isLoading {
-                // 如果没有产品并且不在加载中，显示没有产品的提示
-                VStack(spacing: 15) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 40))
-                        .foregroundColor(.orange)
-                    
-                    Text("无法获取订阅产品信息")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                    
-                    Text(subscriptionService.errorMessage ?? "请检查网络连接或稍后再试")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                    
-                    // 添加重试按钮
-                    Button(action: {
-                        print("用户点击重试按钮，重新加载订阅产品")
-                        subscriptionService.loadProducts()
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.clockwise")
-                            Text("重新加载")
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                    }
-                    .padding(.top, 10)
-                    
-                    // 添加调试信息，仅在开发环境显示
-                    #if DEBUG
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("调试信息：")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        
-                        Text("产品数量：\(subscriptionService.products.count)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        
-                        Text("错误信息：\(subscriptionService.errorMessage ?? "无")")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        
-                        Text("环境：\(StoreKitConfiguration.shared.isTestEnvironment ? "测试环境" : "生产环境")")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        
-                        Text("产品ID：\(ProductIdManager.shared.allSubscriptionProductIds.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .padding()
-                    .background(Color(UIColor.systemGray6))
-                    .cornerRadius(8)
-                    .padding(.top, 10)
-                    #endif
-                    
-                    // 提供手动恢复购买选项
-                    Text("或者尝试恢复之前的购买")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 20)
-                    
-                    Button(action: restorePurchases) {
-                        Text("恢复之前的购买")
-                            .font(.subheadline)
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.top, 5)
-                }
-                .padding()
-                .background(Color(UIColor.systemGray6))
-                .cornerRadius(10)
-                .padding(.horizontal, 20)
-            } else {
-                // 套餐列表
-                ForEach(subscriptionService.products.sorted { 
-                    getSubscriptionOrder($0.type) > getSubscriptionOrder($1.type) 
-                }, id: \.id) { product in
-                    subscriptionCard(product: product)
-                }
-                
-                // 购买按钮
-                if !subscriptionService.products.isEmpty {
-                    Button(action: purchaseSelectedSubscription) {
-                        Text("subscribe_now".localized)
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(
-                                selectedProductId != nil ?
-                                LinearGradient(gradient: Gradient(colors: gradientColors),
-                                              startPoint: .leading, endPoint: .trailing) :
-                                LinearGradient(gradient: Gradient(colors: [Color.gray, Color.gray]),
-                                              startPoint: .leading, endPoint: .trailing)
-                            )
-                            .cornerRadius(10)
-                    }
-                    .disabled(selectedProductId == nil)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    
-                    // 恢复购买按钮
-                    Button(action: restorePurchases) {
-                        Text("restore_purchase".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.top, 10)
-                }
-            }
-        }
-    }
-    
-    // 订阅卡片
-    private func subscriptionCard(product: SubscriptionProduct) -> some View {
-        let isSelected = selectedProductId == product.id
-        
-        return VStack(spacing: 0) {
-            // 标题和价格
+            // 订阅信息卡片
             HStack {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.green)
+                
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(getSubscriptionTitle(for: product.type))
-                        .font(.headline)
+                    // 从UserDefaults获取订阅类型信息
+                    if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo"),
+                       let typeRawValue = subscriptionInfo["type"] as? String,
+                       let type = SubscriptionType(rawValue: typeRawValue) {
+                        Text(type.simplifiedDisplayName)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                    } else {
+                        Text("pro_member".localized)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                    }
                     
-                    if let perMonth = product.pricePerMonth, product.type == .yearly || product.type == .halfYearly || product.type == .quarterly {
-                        Text(perMonth)
+                    // 从UserDefaults获取到期时间
+                    if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo"),
+                       let endDateTimeInterval = subscriptionInfo["endDate"] as? TimeInterval {
+                        let endDate = Date(timeIntervalSince1970: endDateTimeInterval)
+                        Text("valid_until".localized + formattedDate(endDate))
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -422,106 +350,180 @@ struct SubscriptionView: View {
                 
                 Spacer()
                 
-                Text(product.localizedPrice)
-                    .font(.headline)
-            }
-            
-            // 标签
-            if product.type == .yearly {
-                HStack {
-                    Text("save_30_percent".localized)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.red)
-                        .cornerRadius(4)
-                    
-                    Spacer()
-                }
-                .padding(.top, 8)
-            } else if product.type == .halfYearly {
-                HStack {
-                    Text("save_20_percent".localized)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.orange)
-                        .cornerRadius(4)
-                    
-                    Spacer()
-                }
-                .padding(.top, 8)
-            } else if product.type == .quarterly {
-                HStack {
-                    Text("save_10_percent".localized)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.blue)
-                        .cornerRadius(4)
-                    
-                    Spacer()
-                }
-                .padding(.top, 8)
-            }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isSelected ? Color(UIColor.systemGray5) : Color(UIColor.systemGray6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isSelected ? gradientColors[0] : Color.clear, lineWidth: 2)
-                )
-        )
-        .padding(.horizontal, 20)
-        .onTapGesture {
-            self.selectedProductId = product.id
-        }
-    }
-    
-    // 加载视图
-    private var loadingView: some View {
-        HStack {
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle())
-            
-            Text(isRestoring ? "restoring".localized : (isPurchasing ? "processing_purchase".localized : "loading_products".localized))
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 10)
-        }
-        .padding()
-    }
-    
-    // 错误视图
-    private func errorView(message: String) -> some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-            
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 5)
-            
-            Spacer()
-            
-            Button(action: {
-                showError = false
-            }) {
-                Image(systemName: "xmark")
+                // 添加当前状态标签
+                Text("active".localized)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
             }
+            .padding()
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(12)
+            .padding(.horizontal, 20)
         }
-        .padding()
-        .background(Color(UIColor.systemGray6))
-        .cornerRadius(10)
-        .padding(.horizontal, 20)
+    }
+    
+    // 登录建议视图
+    private func loginSuggestionView() -> some View {
+        VStack {
+            HStack(spacing: 10) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundColor(.blue)
+                
+                Text("login_to_sync_subscription".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Button(action: {
+                    // 关闭当前页面
+                    self.isPresented.wrappedValue = false
+                    
+                    // 等待页面关闭后再打开登录页面
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // 发送通知，要求打开登录页面
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("OpenLoginView"),
+                            object: nil
+                        )
+                    }
+                }) {
+                    Text("login".localized)
+                        .font(.subheadline)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 5)
+                        .background(Color.blue)
+                        .cornerRadius(8)
+                }
+            }
+            .padding()
+            .background(Color(UIColor.tertiarySystemBackground))
+            .cornerRadius(12)
+            .padding(.horizontal, 20)
+        }
+    }
+    
+    // 订阅选项视图
+    private var subscriptionOptionsView: some View {
+        VStack(spacing: 20) {
+            // 订阅选项
+            ForEach(subscriptionService.products.sorted(by: { getDiscountPercentage($0) > getDiscountPercentage($1) }), id: \.id) { product in
+                productRow(product: product)
+            }
+            
+            // 如果没有可用产品，显示加载中提示
+            if subscriptionService.products.isEmpty && !subscriptionService.isLoading {
+                Text("loading_products".localized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+            
+            // 恢复购买按钮 - 改为超链接样式
+            Button(action: restorePurchases) {
+                if isRestoring {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                } else {
+                    Text("restore_purchases".localized)
+                        .font(.system(size: 15))
+                        .foregroundColor(.blue)
+                        .underline()
+                }
+            }
+            .disabled(isRestoring)
+            .padding(.top, 5)
+            .padding(.bottom, 10)
+        }
+    }
+    
+    // 获取折扣百分比
+    private func getDiscountPercentage(_ product: SubscriptionProduct) -> Int {
+        switch product.type {
+        case .yearly:
+            return 30
+        case .halfYearly:
+            return 20
+        case .quarterly:
+            return 10
+        default:
+            return 0
+        }
+    }
+    
+    // 获取折扣标签颜色
+    private func getDiscountColor(_ product: SubscriptionProduct) -> Color {
+        switch product.type {
+        case .yearly:
+            return .red
+        case .halfYearly:
+            return .orange
+        case .quarterly:
+            return .blue
+        default:
+            return .gray
+        }
+    }
+    
+    // 产品行
+    private func productRow(product: SubscriptionProduct) -> some View {
+        Button(action: {
+            purchaseProduct(product)
+        }) {
+            VStack(spacing: 8) {
+                HStack {
+                    Text(product.type.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    Text(product.localizedPrice)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                }
+                
+                if let pricePerMonth = product.pricePerMonth {
+                    HStack {
+                        Text(String(format: "price_per_month".localized, pricePerMonth))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Spacer()
+                        
+                        // 显示折扣标签
+                        let discount = getDiscountPercentage(product)
+                        if discount > 0 {
+                            Text(String(format: "save_percent".localized, discount))
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(getDiscountColor(product))
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                        }
+                    }
+                }
+            }
+            .padding()
+            .background(Color(UIColor.tertiarySystemBackground))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        selectedProductId == product.id ? 
+                            Color.blue : Color.clear, 
+                        lineWidth: 2
+                    )
+            )
+            .padding(.horizontal, 20)
+        }
+        .disabled(isPurchasing || isRestoring)
     }
     
     // 底部说明
@@ -529,143 +531,148 @@ struct SubscriptionView: View {
         VStack(spacing: 8) {
             Text("subscription_note".localized)
                 .font(.footnote)
-                .fontWeight(.medium)
                 .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
             
-            Text("subscription_details".localized)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 5) {
+                // 隐私政策链接
+                Link("privacy_policy".localized, destination: URL(string: "https://readaloud.imoqian.cn/yszc.html")!)
+                    .font(.footnote)
+                
+                Text("•")
+                    .foregroundColor(.secondary)
+                    .font(.footnote)
+                
+                // 服务条款链接 - 修改为指向苹果标准EULA
+                Link("terms_of_service".localized, destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                    .font(.footnote)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.top, 10)
+    }
+    
+    // 加载视图
+    private var loadingView: some View {
+        VStack {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+                .scaleEffect(1.5)
+                .padding()
+            
+            Text("processing".localized)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(height: 80)
+    }
+    
+    // 错误视图
+    private func errorView(message: String) -> some View {
+        Text(message)
+            .font(.subheadline)
+            .foregroundColor(.red)
+            .padding()
+            .multilineTextAlignment(.center)
+            .onAppear {
+                // 5秒后自动隐藏错误信息
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    withAnimation {
+                        self.showError = false
+                    }
+                }
+            }
     }
     
     // 关闭按钮
     private var closeButton: some View {
         Button(action: {
-            isPresented.wrappedValue = false
+            self.isPresented.wrappedValue = false
         }) {
             Image(systemName: "xmark")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.primary)
-                .padding(8)
-                .background(Color(UIColor.systemGray6))
-                .clipShape(Circle())
+                .font(.headline)
         }
     }
     
     // MARK: - 辅助方法
     
-    // 获取订阅类型的显示顺序
-    private func getSubscriptionOrder(_ type: SubscriptionType) -> Int {
-        switch type {
-        case .yearly:
-            return 4
-        case .halfYearly:
-            return 3
-        case .quarterly:
-            return 2
-        case .monthly:
-            return 1
-        case .none:
-            return 0
-        }
-    }
-    
-    // 根据类型获取订阅名称
-    private func getSubscriptionTitle(for type: SubscriptionType) -> String {
-        switch type {
-        case .monthly:
-            return "monthly_subscription".localized
-        case .quarterly:
-            return "quarterly_subscription".localized
-        case .halfYearly:
-            return "half_yearly_subscription".localized
-        case .yearly:
-            return "yearly_subscription".localized
-        case .none:
-            return "no_subscription".localized
-        }
-    }
-    
-    // 格式化日期
+    // 日期格式化
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        
-        // 根据当前语言设置选择区域
-        let isChineseLanguage = LanguageManager.shared.currentLanguage.languageCode == "zh-Hans"
-        formatter.locale = Locale(identifier: isChineseLanguage ? "zh_CN" : "en_US")
-        
-        // 使用本地化的日期格式
-        if isChineseLanguage {
-            // 已有自定义的中文格式
-            return formatter.string(from: date)
-        } else {
-            // 使用本地化字符串中定义的日期格式
-            let dateString = formatter.string(from: date)
-            return dateString
-        }
+        return formatter.string(from: date)
     }
     
-    // 购买选中的订阅
-    private func purchaseSelectedSubscription() {
-        guard let productId = selectedProductId else { return }
+    // 购买产品
+    private func purchaseProduct(_ product: SubscriptionProduct) {
+        print("开始购买产品: \(product.type.displayName), 价格: \(product.localizedPrice)")
         
+        selectedProductId = product.id
         isPurchasing = true
         errorMessage = nil
         showError = false
         
-        subscriptionService.purchaseSubscription(productId: productId) { result in
-            DispatchQueue.main.async {
-                self.isPurchasing = false
+        // 修改为无需用户登录即可购买
+        subscriptionService.purchaseSubscription(productId: product.id) { result in
+            isPurchasing = false
+            
+            switch result {
+            case .success(let subscriptionType):
+                print("购买成功: \(subscriptionType.rawValue)")
                 
-                switch result {
-                case .success:
-                    // 购买成功，关闭订阅页面
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                        self.isPresented.wrappedValue = false
-                    }
-                case .failure(let error):
-                    // 显示错误
-                    self.errorMessage = error.localizedDescription
-                    self.showError = true
-                }
+                // 显示购买成功提示
+                errorMessage = "purchase_success".localized
+                showError = true
+                
+                // 发送通知更新订阅状态
+                NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                
+            case .failure(let error):
+                print("购买失败: \(error.localizedDescription)")
+                
+                // 显示错误信息
+                errorMessage = error.localizedDescription
+                showError = true
             }
         }
     }
     
     // 恢复购买
     private func restorePurchases() {
+        print("开始恢复购买")
+        
         isRestoring = true
         errorMessage = nil
         showError = false
         
-        // 使用传统的StoreKit API恢复购买，避免重复创建订阅
-        print("使用订阅服务恢复购买")
+        // 修改为无需用户登录即可恢复购买
         subscriptionService.restorePurchases { result in
-            DispatchQueue.main.async {
-                self.isRestoring = false
+            isRestoring = false
+            
+            switch result {
+            case .success(let restoredType):
+                print("恢复购买成功: \(restoredType?.rawValue ?? "无")")
                 
-                switch result {
-                case .success(let type):
-                    if type == nil || type == .none {
-                        self.errorMessage = "no_restorable_purchases".localized
-                        self.showError = true
-                    } else {
-                        // 恢复成功，等待1秒后关闭订阅页面
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            self.isPresented.wrappedValue = false
-                        }
-                    }
-                case .failure(let error):
-                    // 显示错误
-                    self.errorMessage = error.localizedDescription
-                    self.showError = true
+                if let type = restoredType, type != .none {
+                    // 显示恢复成功提示
+                    errorMessage = String(format: "restored_subscription".localized, type.displayName)
+                    showError = true
+                    
+                    // 发送通知更新订阅状态
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                } else {
+                    // 显示未找到可恢复购买的提示
+                    errorMessage = "no_purchases_to_restore".localized
+                    showError = true
                 }
+                
+            case .failure(let error):
+                print("恢复购买失败: \(error.localizedDescription)")
+                
+                // 显示错误信息
+                errorMessage = error.localizedDescription
+                showError = true
             }
         }
     }

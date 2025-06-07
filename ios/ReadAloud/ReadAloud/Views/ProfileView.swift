@@ -1,5 +1,11 @@
 import SwiftUI
 
+// 添加登录提示类型枚举
+enum LoginPromptType {
+    case subscription
+    case importPurchase
+}
+
 struct ProfileView: View {
     // 用户管理器
     @ObservedObject private var userManager = UserManager.shared
@@ -18,6 +24,13 @@ struct ProfileView: View {
     @State private var deleteAccountSuccess: Bool = false // 添加删除账户操作结果状态
     @State private var isShowingAccountSettings: Bool = false // 添加账号设置状态
     @State private var isLoggingOut = false
+    
+    // 添加登录提示相关状态
+    @State private var showLoginPromptAlert: Bool = false
+    @State private var currentLoginPromptType: LoginPromptType = .subscription
+    @State private var loginPromptMessage: String = ""
+    @State private var loginPromptTitle: String = ""
+    @State private var continueAction: () -> Void = {}
     
     // 语言管理器
     @ObservedObject private var languageManager = LanguageManager.shared
@@ -55,21 +68,39 @@ struct ProfileView: View {
                         VStack(spacing: 8) {
                             // 如果是PRO会员，显示会员标签
                             if user.hasActiveSubscription {
-                                HStack {
-                                    Image(systemName: "crown.fill")
-                                        .foregroundColor(.yellow)
-                                    Text("pro_member".localized)
-                                        .foregroundColor(.orange)
-                                        .font(.system(size: 14, weight: .medium))
+                                VStack(spacing: 5) {
+                                    HStack {
+                                        Image(systemName: "crown.fill")
+                                            .foregroundColor(.yellow)
+                                        Text("pro_member".localized)
+                                            .foregroundColor(.orange)
+                                            .font(.system(size: 14, weight: .medium))
+                                    }
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 12)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(15)
+                                    
+                                    // 显示到期时间
+                                    if let endDate = user.subscriptionEndDate {
+                                        HStack {
+                                            Image(systemName: "calendar")
+                                                .foregroundColor(.gray)
+                                                .font(.system(size: 12))
+                                            Text("valid_until".localized + formattedDate(endDate))
+                                                .foregroundColor(.gray)
+                                                .font(.system(size: 12))
+                                        }
+                                        .padding(.vertical, 2)
+                                        .padding(.horizontal, 8)
+                                        .background(Color(UIColor.systemGray6))
+                                        .cornerRadius(10)
+                                    }
                                 }
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 12)
-                                .background(Color(UIColor.systemGray6))
-                                .cornerRadius(15)
                             }
                             
                             // 所有用户都显示剩余导入次数
-                            Text("remaining_imports".localized(with: user.remainingImportCount))
+                            Text("remaining_imports".localized(with: userManager.getRemainingImportCount()))
                                 .font(.system(size: 14))
                                 .foregroundColor(.red)
                                 .padding(.vertical, 4)
@@ -93,6 +124,55 @@ struct ProfileView: View {
                             .cornerRadius(10)
                     }
                     .padding(.vertical, 15)
+                    
+                    // 添加未登录用户显示会员状态和剩余导入次数
+                    VStack(spacing: 8) {
+                        // 如果是PRO会员，显示会员标签
+                        if SubscriptionChecker.shared.hasPremiumAccess {
+                            VStack(spacing: 5) {
+                                HStack {
+                                    Image(systemName: "crown.fill")
+                                        .foregroundColor(.yellow)
+                                    Text("pro_member".localized)
+                                        .foregroundColor(.orange)
+                                        .font(.system(size: 14, weight: .medium))
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 12)
+                                .background(Color(UIColor.systemGray6))
+                                .cornerRadius(15)
+                                
+                                // 显示到期时间，从UserDefaults获取
+                                if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo"),
+                                   let endDateTimeInterval = subscriptionInfo["endDate"] as? TimeInterval {
+                                    let endDate = Date(timeIntervalSince1970: endDateTimeInterval)
+                                    HStack {
+                                        Image(systemName: "calendar")
+                                            .foregroundColor(.gray)
+                                            .font(.system(size: 12))
+                                        Text("valid_until".localized + formattedDate(endDate))
+                                            .foregroundColor(.gray)
+                                            .font(.system(size: 12))
+                                    }
+                                    .padding(.vertical, 2)
+                                    .padding(.horizontal, 8)
+                                    .background(Color(UIColor.systemGray6))
+                                    .cornerRadius(10)
+                                }
+                            }
+                        }
+                        
+                        // 显示剩余导入次数
+                        let remainingImports = userManager.getRemainingImportCount()
+                        Text("remaining_imports".localized(with: remainingImports))
+                            .font(.system(size: 14))
+                            .foregroundColor(.red)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 12)
+                            .background(Color(UIColor.systemGray6))
+                            .cornerRadius(15)
+                    }
+                    .padding(.top, 5)
                 }
                 
                 // 分割线
@@ -101,13 +181,14 @@ struct ProfileView: View {
                 
                 // 设置项目列表
                 List {
-                    // 会员订阅项 - 不论是否登录都显示
+                    // 订阅会员项
                     Button(action: {
-                        if userManager.isLoggedIn {
-                            isShowingSubscription = true
-                        } else {
+                        // 检查用户是否已登录
+                        if !userManager.isLoggedIn {
                             // 显示登录提示
-                            showLoginAlert = true
+                            showLoginPrompt(forAction: .subscription)
+                        } else {
+                            isShowingSubscription = true
                         }
                     }) {
                         HStack {
@@ -120,10 +201,32 @@ struct ProfileView: View {
                             
                             Spacer()
                             
-                            if let user = userManager.currentUser, user.hasActiveSubscription {
-                                Text("pro_member".localized)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.orange)
+                            if userManager.isLoggedIn, let user = userManager.currentUser, user.hasActiveSubscription {
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("pro_member".localized)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.orange)
+                                    
+                                    if let endDate = user.subscriptionEndDate {
+                                        Text("valid_until".localized + formattedDate(endDate))
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                            } else if !userManager.isLoggedIn && SubscriptionChecker.shared.hasPremiumAccess {
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("pro_member".localized)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.orange)
+                                    
+                                    if let subscriptionInfo = UserDefaults.standard.dictionary(forKey: "tempSubscriptionInfo"),
+                                       let endDateTimeInterval = subscriptionInfo["endDate"] as? TimeInterval {
+                                        let endDate = Date(timeIntervalSince1970: endDateTimeInterval)
+                                        Text("valid_until".localized + formattedDate(endDate))
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.gray)
+                                    }
+                                }
                             }
                             
                             Image(systemName: "chevron.right")
@@ -135,11 +238,12 @@ struct ProfileView: View {
                     
                     // 购买导入次数项
                     Button(action: {
-                        if userManager.isLoggedIn {
-                            isShowingImportPurchase = true
-                        } else {
+                        // 检查用户是否已登录
+                        if !userManager.isLoggedIn {
                             // 显示登录提示
-                            showLoginAlert = true
+                            showLoginPrompt(forAction: .importPurchase)
+                        } else {
+                            isShowingImportPurchase = true
                         }
                     }) {
                         HStack {
@@ -152,11 +256,10 @@ struct ProfileView: View {
                             
                             Spacer()
                             
-                            if let user = userManager.currentUser {
-                                Text("\(user.remainingImportCount)")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.red)
-                            }
+                            // 显示统一的导入次数
+                            Text("\(userManager.getRemainingImportCount())")
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
                             
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 14))
@@ -278,6 +381,16 @@ struct ProfileView: View {
                     print("ProfileView: 收到订阅状态更新通知")
                     self.refreshView.toggle() // 触发界面刷新
                 }
+                
+                // 添加打开登录页面通知观察者
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("OpenLoginView"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    print("ProfileView: 收到打开登录页面通知")
+                    isShowingLogin = true
+                }
             }
             .onDisappear {
                 // 移除通知观察者
@@ -286,9 +399,16 @@ struct ProfileView: View {
                     name: NSNotification.Name("SubscriptionStatusUpdated"),
                     object: nil
                 )
+                
+                // 移除打开登录页面通知观察者
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSNotification.Name("OpenLoginView"),
+                    object: nil
+                )
             }
             .id(refreshView) // 使用id强制视图在refreshView变化时重新构建
-            // 添加登录提示弹窗
+            // 添加登录提示弹窗（旧版，保留以供兼容）
             .alert("login_required".localized, isPresented: $showLoginAlert) {
                 Button("login".localized, role: .none) {
                     isShowingLogin = true
@@ -296,6 +416,18 @@ struct ProfileView: View {
                 Button("cancel".localized, role: .cancel) {}
             } message: {
                 Text("login_required_message".localized)
+            }
+            // 添加自定义登录提示弹窗
+            .alert(loginPromptTitle, isPresented: $showLoginPromptAlert) {
+                Button("login".localized, role: .none) {
+                    isShowingLogin = true
+                }
+                Button("continue_without_login".localized, role: .cancel) {
+                    // 执行继续操作
+                    continueAction()
+                }
+            } message: {
+                Text(loginPromptMessage)
             }
             // 添加删除账户确认弹窗
             .alert("delete_account_confirm_title".localized, isPresented: $showDeleteAccountAlert) {
@@ -417,5 +549,44 @@ struct AccountSettingsView: View {
 struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         ProfileView()
+    }
+}
+
+// 添加扩展，提供辅助方法
+extension ProfileView {
+    /// 格式化日期为可读形式
+    /// - Parameter date: 日期对象
+    /// - Returns: 格式化后的字符串
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+}
+
+// 添加showLoginPrompt方法
+extension ProfileView {
+    /// 显示登录提示
+    /// - Parameter forAction: 登录提示类型
+    private func showLoginPrompt(forAction: LoginPromptType) {
+        currentLoginPromptType = forAction
+        
+        switch forAction {
+        case .subscription:
+            loginPromptTitle = "login_required_title".localized
+            loginPromptMessage = "subscription_login_message".localized
+            continueAction = {
+                isShowingSubscription = true
+            }
+        case .importPurchase:
+            loginPromptTitle = "login_required_title".localized
+            loginPromptMessage = "import_login_message".localized
+            continueAction = {
+                isShowingImportPurchase = true
+            }
+        }
+        
+        showLoginPromptAlert = true
     }
 } 

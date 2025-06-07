@@ -294,21 +294,39 @@ struct ImportPurchaseView: View {
     
     // 底部描述
     private var footerView: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("purchase_note".localized)
-                .font(.subheadline)
-                .fontWeight(.semibold)
+        VStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("purchase_note".localized)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                Text("import_purchase_details".localized)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .lineSpacing(5)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color(UIColor.systemGray6))
+            .cornerRadius(10)
+            .padding(.horizontal, 20)
             
-            Text("import_purchase_details".localized)
-                .font(.footnote)
-                .foregroundColor(.secondary)
-                .lineSpacing(5)
+            // 添加隐私政策和EULA链接
+            HStack(spacing: 5) {
+                // 隐私政策链接
+                Link("privacy_policy".localized, destination: URL(string: "https://readaloud.imoqian.cn/yszc.html")!)
+                    .font(.footnote)
+                
+                Text("•")
+                    .foregroundColor(.secondary)
+                    .font(.footnote)
+                
+                // 服务条款链接 - 使用苹果标准EULA
+                Link("terms_of_service".localized, destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+                    .font(.footnote)
+            }
+            .padding(.top, 5)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(UIColor.systemGray6))
-        .cornerRadius(10)
-        .padding(.horizontal, 20)
     }
     
     // MARK: - 操作方法
@@ -316,13 +334,6 @@ struct ImportPurchaseView: View {
     // 购买选中的产品
     private func purchaseSelectedProduct() {
         guard let productId = selectedProductId else { return }
-        
-        // 检查用户是否已登录
-        guard userManager.isLoggedIn else {
-            errorMessage = "please_login_first".localized
-            showError = true
-            return
-        }
         
         // 开始购买
         isPurchasing = true

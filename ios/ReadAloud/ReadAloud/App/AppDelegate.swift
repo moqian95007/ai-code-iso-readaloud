@@ -35,6 +35,29 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             print("使用StoreKit 1.0，不支持环境检测")
         }
         
+        // 记录应用启动日志
+        LogManager.shared.log("应用启动", level: .info, category: "应用生命周期")
+        
+        // 启动时恢复所有交易
+        print("应用启动，开始恢复订阅和购买次数")
+        Task {
+            // 延迟一小段时间启动恢复，确保其他初始化已完成
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 延迟1秒
+            
+            // 在主线程执行恢复操作
+            await MainActor.run {
+                StoreKitManager.shared.restoreTransactionsAtLaunch { success in
+                    if success {
+                        print("启动时恢复交易成功")
+                        LogManager.shared.log("启动时恢复交易成功", level: .info, category: "StoreKit")
+                    } else {
+                        print("启动时恢复交易未成功完成")
+                        LogManager.shared.log("启动时恢复交易未成功完成", level: .warning, category: "StoreKit")
+                    }
+                }
+            }
+        }
+        
         return true
     }
     

@@ -60,6 +60,15 @@ class SubscriptionManager: NSObject, ObservableObject {
     // 产品ID管理器
     private let productIdManager = ProductIdManager.shared
     
+    // 添加订阅时长映射字典
+    private let subscriptionDurationMap: [String: Int] = [
+        // 简化版ID
+        "monthly": 1,
+        "quarterly": 3,
+        "halfYearly": 6,
+        "Yearly": 12
+    ]
+    
     // 可用产品列表
     @Published var availableProducts: [SubscriptionProduct] = []
     @Published var isLoading: Bool = false
@@ -257,10 +266,10 @@ class SubscriptionManager: NSObject, ObservableObject {
         let isTestEnvironment = StoreKitConfiguration.shared.isTestEnvironment
         print("当前StoreKit环境: \(isTestEnvironment ? "沙盒测试环境" : "生产环境")")
         
-        // 直接使用四种简化ID
+        // 使用简化版产品ID
         let subscriptionProductIds = ["quarterly", "monthly", "Yearly", "halfYearly"]
         
-        print("简化版订阅产品ID: \(subscriptionProductIds.joined(separator: ", "))")
+        print("订阅产品ID: \(subscriptionProductIds.joined(separator: ", "))")
         
         // 检查缓存产品
         let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
@@ -465,63 +474,31 @@ class SubscriptionManager: NSObject, ObservableObject {
                                       && (transaction.expirationDate == nil || transaction.expirationDate! > Date())
                         
                         // 根据产品ID确定订阅类型
-                        let subscriptionType = subscriptionTypeForProductId(transaction.productID)
+                        let subscriptionType = self.subscriptionTypeForProductId(transaction.productID)
                         
                         if isActive {
-                            print("发现活跃的订阅: \(subscriptionType.rawValue)")
-                            hasActiveSubscription = true
-                            latestSubscriptionType = subscriptionType
+                            print("StoreKit 2.0 发现活跃的订阅: \(subscriptionType.rawValue), 开始处理")
+                            hasProcessedActiveSubscription = true
                             
-                            // 创建订阅记录
-                            if let user = UserManager.shared.currentUser, user.id > 0 {
-                                print("为用户 \(user.id) 创建订阅记录")
-                                
-                                // 使用原始购买日期
-                                let startDate = transaction.originalPurchaseDate
-                                var endDate = transaction.expirationDate ?? Date().addingTimeInterval(86400 * 30) // 默认30天
-                                
-                                print("订阅起始日期: \(startDate)")
-                                print("订阅结束日期: \(endDate)")
-                                
-                                // 检查是否有退款
-                                if let revocationDate = transaction.revocationDate {
-                                    print("订阅已撤销，撤销日期: \(revocationDate)")
-                                    endDate = revocationDate
-                                }
-                                
-                                // 创建新的订阅记录
-                                let subscription = Subscription(
-                                    userId: user.id,
-                                    type: subscriptionType,
-                                    startDate: startDate,
-                                    endDate: endDate,
-                                    subscriptionId: "sk2_restored_\(transaction.id)_\(transaction.productID)"
-                                )
-                                
-                                // 添加到订阅仓库 - 这里有同步机制，会自动触发同步到服务器
-                                SubscriptionRepository.shared.addSubscription(subscription)
-                                print("已添加恢复的订阅记录到仓库")
-                                
-                                // 标记已处理
-                                hasProcessedActiveSubscription = true
-                                
-                                // 找到有效订阅后立即完成流程
-                                print("找到有效订阅，准备返回结果")
-                                DispatchQueue.main.async {
-                                    print("返回恢复购买结果: 类型=\(subscriptionType.rawValue)")
-                                    // 不在这里发送通知，留给SubscriptionService统一处理
-                                    // NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                                    completion(.success(subscriptionType))
-                                    self.purchaseCompletionHandler?(.success(subscriptionType))
-                                    self.purchaseCompletionHandler = nil
-                                    print("========== StoreKit 2.0 恢复购买结束 ==========")
-                                }
-                                
-                                // 找到活跃订阅并处理后不再继续检查其他交易
-                                break
-                            } else {
-                                print("用户未登录，无法创建订阅记录")
+                            // 处理恢复的订阅
+                            self.handleRestoredSubscription(
+                                subscriptionType: subscriptionType, 
+                                originalPurchaseDate: transaction.originalPurchaseDate,
+                                expirationDate: transaction.expirationDate
+                            )
+                            
+                            DispatchQueue.main.async {
+                                print("返回恢复购买结果: 类型=\(subscriptionType.rawValue)")
+                                // 不在这里发送通知，留给SubscriptionService统一处理
+                                // NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                                completion(.success(subscriptionType))
+                                self.purchaseCompletionHandler?(.success(subscriptionType))
+                                self.purchaseCompletionHandler = nil
+                                print("========== StoreKit 2.0 恢复购买结束 ==========")
                             }
+                            
+                            // 找到活跃订阅并处理后不再继续检查其他交易
+                            break
                         } else {
                             print("发现已过期的订阅: \(subscriptionType.rawValue)")
                         }
@@ -682,7 +659,19 @@ class SubscriptionManager: NSObject, ObservableObject {
             print("订阅结束日期: \(endDate)")
         }
         
-        // 更新用户订阅状态
+        // 处理购买成功的订阅交易
+        handlePurchasedSubscription(productId: productId, startDate: startDate, endDate: endDate, subscriptionType: subscriptionType)
+    }
+    
+    /// 处理购买成功的订阅交易
+    private func handlePurchasedSubscription(productId: String, startDate: Date, endDate: Date?, subscriptionType: SubscriptionType) {
+        print("========================================")
+        print("开始处理订阅购买成功 - 产品ID: \(productId)")
+        print("订阅类型: \(subscriptionType.rawValue)")
+        print("订阅开始日期: \(startDate.description)")
+        print("订阅结束日期: \(endDate?.description ?? "未知")")
+        
+        // 检查用户是否已登录
         if let user = UserManager.shared.currentUser, user.id > 0 {
             print("更新用户ID \(user.id) 的订阅状态")
             
@@ -699,22 +688,42 @@ class SubscriptionManager: NSObject, ObservableObject {
             // 因此不需要在这里发送通知或进行其他操作
             SubscriptionRepository.shared.addSubscription(subscription)
             print("成功添加订阅记录: \(subscription.subscriptionId)")
-            
-            // 发送通知更新UI
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-            }
-            
-            // 完成回调
-            purchaseCompletionHandler?(.success(subscriptionType))
-            purchaseCompletionHandler = nil
         } else {
-            // 用户未登录
-            print("错误: 用户未登录，无法更新订阅状态")
-            purchaseCompletionHandler?(.failure(NSError(domain: "SubscriptionManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "用户未登录"])))
-            purchaseCompletionHandler = nil
+            // 用户未登录，将订阅状态保存到UserDefaults
+            print("用户未登录，将订阅状态保存到UserDefaults")
+            UserDefaults.standard.set(true, forKey: "guestHasPremiumAccess")
+            
+            // 保存临时订阅信息，包括到期时间
+            storeTempSubscriptionInfo(type: subscriptionType, startDate: startDate, endDate: endDate)
         }
+        
+        // 无论用户是否登录，都发送通知更新UI并通知购买成功
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+        }
+        
+        // 完成回调
+        purchaseCompletionHandler?(.success(subscriptionType))
+        purchaseCompletionHandler = nil
+        
         print("========================================")
+    }
+    
+    /// 临时存储订阅信息，供用户后续登录时使用
+    private func storeTempSubscriptionInfo(type: SubscriptionType, startDate: Date, endDate: Date?) {
+        let endDateValue = endDate ?? Date().addingTimeInterval(30 * 24 * 60 * 60) // 默认30天
+        let endDateTimeInterval = endDateValue.timeIntervalSince1970
+        
+        let subscriptionInfo: [String: Any] = [
+            "type": type.rawValue,
+            "startDate": startDate.timeIntervalSince1970,
+            "endDate": endDateTimeInterval
+        ]
+        
+        UserDefaults.standard.set(subscriptionInfo, forKey: "tempSubscriptionInfo")
+        UserDefaults.standard.synchronize() // 强制同步
+        
+        print("已存储临时订阅信息，等待用户登录后同步")
     }
     
     /// 添加这两个辅助方法到SubscriptionManager类中
@@ -750,6 +759,47 @@ class SubscriptionManager: NSObject, ObservableObject {
         case .none:
             return ""
         }
+    }
+    
+    /// 处理恢复购买成功
+    private func handleRestoredSubscription(subscriptionType: SubscriptionType, originalPurchaseDate: Date, expirationDate: Date?) {
+        print("========================================")
+        print("开始处理恢复购买成功")
+        print("订阅类型: \(subscriptionType.rawValue)")
+        print("原始购买日期: \(originalPurchaseDate.description)")
+        print("过期日期: \(expirationDate?.description ?? "未知")")
+        
+        // 检查用户是否已登录
+        if let user = UserManager.shared.currentUser, user.id > 0 {
+            print("为用户ID \(user.id) 创建恢复的订阅记录")
+            
+            // 创建订阅记录
+            let subscription = Subscription(
+                userId: user.id,
+                type: subscriptionType,
+                startDate: originalPurchaseDate,
+                endDate: expirationDate ?? Date().addingTimeInterval(86400 * 30), // 默认30天
+                subscriptionId: "restored_\(UUID().uuidString)"
+            )
+            
+            // 添加到订阅仓库
+            SubscriptionRepository.shared.addSubscription(subscription)
+            print("成功添加恢复的订阅记录: \(subscription.subscriptionId)")
+        } else {
+            // 用户未登录，将订阅状态保存到UserDefaults
+            print("用户未登录，将恢复的订阅状态保存到UserDefaults")
+            UserDefaults.standard.set(true, forKey: "guestHasPremiumAccess")
+            
+            // 保存临时订阅信息，包括到期时间
+            storeTempSubscriptionInfo(type: subscriptionType, startDate: originalPurchaseDate, endDate: expirationDate)
+        }
+        
+        // 无论用户是否登录，都发送通知更新UI
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+        }
+        
+        print("========================================")
     }
 }
 
@@ -910,10 +960,13 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
             print("记录交易ID: \(id)，目前已处理 \(processedTransactionIds.count) 个交易")
         }
         
-        // 忽略消费型产品的交易 - 由ImportPurchaseService处理
+        // 获取产品ID
         let productId = transaction.payment.productIdentifier
-        if productId.contains("import.") {
-            print("检测到消费型产品交易: \(productId)，由ImportPurchaseService处理")
+        
+        // 检查产品类型，只处理订阅类产品
+        let productType = ProductIdManager.shared.getProductType(for: productId)
+        if productType != .subscription {
+            print("非订阅类产品: \(productId)，由对应服务处理")
             SKPaymentQueue.default().finishTransaction(transaction)
             return
         }
@@ -935,101 +988,26 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
     }
     
     private func handleRestoredTransaction(_ transaction: SKPaymentTransaction) {
-        // 详细打印恢复购买的交易信息
-        print("========== 恢复购买详细信息 ==========")
-        
-        // 忽略消费型产品的交易 - 由ImportPurchaseService处理
+        // 获取产品ID
         let productId = transaction.payment.productIdentifier
-        if productId.contains("import.") {
-            print("检测到消费型产品恢复交易: \(productId)，由ImportPurchaseService处理")
-            SKPaymentQueue.default().finishTransaction(transaction)
-            return
-        }
+        print("恢复交易成功 - 产品ID: \(productId)")
         
-        print("交易ID: \(transaction.transactionIdentifier ?? "未知")")
-        print("交易日期: \(transaction.transactionDate?.description ?? "未知")")
-        print("产品ID: \(transaction.payment.productIdentifier)")
-        print("购买数量: \(transaction.payment.quantity)")
-        
-        // 打印原始交易信息
-        print("原始交易信息：")
-        if let originalTransaction = transaction.original {
-            print("原始交易ID: \(originalTransaction.transactionIdentifier ?? "未知")")
-            print("原始交易日期(原始格式): \(originalTransaction.transactionDate ?? Date())")
-            
-            if let date = originalTransaction.transactionDate {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                print("原始交易日期(格式化): \(formatter.string(from: date))")
-                print("原始交易日期距今: \(Date().timeIntervalSince(date) / 86400) 天")
-            } else {
-                print("⚠️ 原始交易日期为空")
-            }
-            
-            print("原始产品ID: \(originalTransaction.payment.productIdentifier)")
-            print("原始交易状态: \(originalTransaction.transactionState.rawValue)")
-        } else {
-            print("⚠️ 没有原始交易信息")
-        }
-        
-        // 打印收据信息
-        if let receiptURL = Bundle.main.appStoreReceiptURL {
-            print("收据URL: \(receiptURL.path)")
-            if let receiptData = try? Data(contentsOf: receiptURL) {
-                print("收据数据大小: \(receiptData.count) 字节")
-                // 将收据转换为Base64字符串，取前50个字符打印
-                let base64Receipt = receiptData.base64EncodedString()
-                print("收据前缀: \(String(base64Receipt.prefix(50)))...")
-            }
-        }
-        
-        // 获取原始交易的产品ID
-        guard let productId = transaction.original?.payment.productIdentifier else {
-            print("错误: 恢复购买失败，无法获取原始交易的产品ID")
-            purchaseCompletionHandler?(.failure(NSError(domain: "SubscriptionManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "恢复购买失败，无法获取原始交易"])))
-            purchaseCompletionHandler = nil
-            SKPaymentQueue.default().finishTransaction(transaction)
-            return
-        }
-        
-        // 获取收据数据
-        guard let receiptURL = Bundle.main.appStoreReceiptURL,
-              let receiptData = try? Data(contentsOf: receiptURL) else {
-            print("错误: 恢复购买失败，无法获取收据数据")
-            purchaseCompletionHandler?(.failure(NSError(domain: "SubscriptionManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法获取收据"])))
-            purchaseCompletionHandler = nil
-            SKPaymentQueue.default().finishTransaction(transaction)
-            return
-        }
-        
-        // 尝试获取原始购买日期
-        var originalPurchaseDate: Date? = nil
-        if let originalTransaction = transaction.original {
-            // 获取交易日期作为原始购买日期
-            originalPurchaseDate = originalTransaction.transactionDate
-            if let date = originalPurchaseDate {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                print("恢复购买成功，原始购买日期: \(formatter.string(from: date))")
-            } else {
-                print("⚠️ 警告：恢复购买成功，但原始购买日期为空")
-            }
-        } else {
-            print("⚠️ 警告：恢复购买成功，但无法获取原始交易信息")
-        }
-        
-        // 记录对应的订阅类型
+        // 根据产品ID确定订阅类型
         let subscriptionType = subscriptionTypeForProductId(productId)
-        print("恢复的订阅类型: \(subscriptionType)")
-        print("========================================")
         
-        // 验证收据并更新订阅，传递原始购买日期
-        verifyReceiptAndUpdateSubscription(receiptData: receiptData, productId: productId, originalPurchaseDate: originalPurchaseDate)
+        // 使用原始交易信息获取时间
+        let originalPurchaseDate = transaction.original?.transactionDate ?? Date()
+        let expirationDate = Calendar.current.date(byAdding: .month, value: subscriptionDurationMap[productId] ?? 1, to: originalPurchaseDate)
         
-        // 发送订阅状态更新通知
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-        }
+        // 处理恢复的订阅
+        handleRestoredSubscription(
+            subscriptionType: subscriptionType,
+            originalPurchaseDate: originalPurchaseDate,
+            expirationDate: expirationDate
+        )
+        
+        // 发送回调通知
+        purchaseCompletionHandler?(.success(subscriptionType))
         
         // 完成交易
         SKPaymentQueue.default().finishTransaction(transaction)
@@ -1100,6 +1078,15 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
         }
         print("=====================================")
         // 如果purchaseCompletionHandler为nil，说明已经在handleRestoredTransaction中处理了恢复逻辑
+        
+        // 发送恢复完成通知（用于StoreKitManager监听）
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("SKRestoreTransactionsFinished"),
+                object: nil,
+                userInfo: ["success": true]
+            )
+        }
     }
     
     func paymentQueue(_ queue: SKPaymentQueue, restoreCompletedTransactionsFailedWithError error: Error) {
@@ -1118,6 +1105,13 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
             // 通知UI更新
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                
+                // 发送恢复完成通知（视为成功）
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("SKRestoreTransactionsFinished"),
+                    object: nil,
+                    userInfo: ["success": true]
+                )
             }
             
             return
@@ -1151,5 +1145,14 @@ extension SubscriptionManager: SKPaymentTransactionObserver {
         
         purchaseCompletionHandler?(.failure(error))
         purchaseCompletionHandler = nil
+        
+        // 发送恢复失败通知（用于StoreKitManager监听）
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("SKRestoreTransactionsFinished"),
+                object: nil,
+                userInfo: ["success": false, "error": error]
+            )
+        }
     }
 } 

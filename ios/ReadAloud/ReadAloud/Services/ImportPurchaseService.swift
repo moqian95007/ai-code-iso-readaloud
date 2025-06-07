@@ -3,6 +3,7 @@ import Combine
 import StoreKit
 import UIKit
 import SwiftUI
+import ObjectiveC
 
 /// 导入次数购买服务
 class ImportPurchaseService: NSObject, ObservableObject {
@@ -187,11 +188,15 @@ class ImportPurchaseService: NSObject, ObservableObject {
         isLoading = true
         errorMessage = nil
         
+        print("开始加载导入产品 - ImportPurchaseService")
+        
         // 先检查StoreKitConfiguration中是否已有缓存的产品
         let cachedProducts = StoreKitConfiguration.shared.getAllCachedProducts()
         
-        // 直接使用四种简化导入产品ID
-        let importProductIds = ["import.single", "import.three", "import.five", "import.ten"]
+        // 使用ProductIdManager获取简化导入产品ID
+        let importProductIds = ProductIdManager.shared.allSimplifiedConsumableIds
+        
+        print("导入产品ID: \(importProductIds.joined(separator: ", "))")
         
         // 检查是否所有产品都已在缓存中
         let allProductsCached = importProductIds.allSatisfy { cachedProducts[$0] != nil }
@@ -207,7 +212,34 @@ class ImportPurchaseService: NSObject, ObservableObject {
             let productIds = Set(importProductIds)
             productRequest = SKProductsRequest(productIdentifiers: productIds)
             productRequest?.delegate = self
+            
+            // 添加关联对象标识，以便StoreKitConfiguration能区分导入请求和订阅请求
+            objc_setAssociatedObject(productRequest!, UnsafeRawPointer(bitPattern: 2)!, "import_products", .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            
             productRequest?.start()
+            
+            // 添加自定义超时处理，避免StoreKitConfiguration的通用超时处理
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+                guard let self = self else { return }
+                
+                // 如果仍在加载中且产品列表为空，则认为超时
+                if self.isLoading && self.products.isEmpty {
+                    print("⚠️ 导入产品请求超时 (ImportPurchaseService)")
+                    
+                    // 取消之前的请求
+                    self.productRequest?.cancel()
+                    self.productRequest = nil
+                    
+                    // 更新UI状态
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.errorMessage = "加载产品超时，请检查网络连接或稍后再试"
+                        
+                        // 发送通知，通知UI更新
+                        NotificationCenter.default.post(name: NSNotification.Name("ImportProductsUpdated"), object: nil)
+                    }
+                }
+            }
         }
     }
     
@@ -216,12 +248,6 @@ class ImportPurchaseService: NSObject, ObservableObject {
     ///   - productId: 产品ID
     ///   - completion: 完成回调
     func purchaseImportCount(productId: String, completion: @escaping (Result<Int, Error>) -> Void) {
-        // 验证用户是否已登录
-        guard userManager.isLoggedIn, let _ = userManager.currentUser else {
-            completion(.failure(NSError(domain: "ImportPurchaseService", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先登录再购买导入次数"])))
-            return
-        }
-        
         // 首先检查缓存中是否有此产品
         if let cachedProduct = StoreKitConfiguration.shared.getCachedProduct(productId: productId) {
             // 使用缓存的产品进行购买
@@ -329,54 +355,56 @@ extension ImportPurchaseService: SKPaymentTransactionObserver {
         }
     }
     
-    /// 处理购买成功的交易
+    /// 处理完成的购买交易
     private func handlePurchasedTransaction(_ transaction: SKPaymentTransaction) {
+        // 获取产品ID
         let productId = transaction.payment.productIdentifier
+        print("成功购买产品: \(productId)")
         
-        // 简化获取导入次数逻辑
-        var importCount: Int
-        
-        // 直接根据产品ID判断次数
-        switch productId {
-        case "import.single":
-            importCount = 1
-        case "import.three":
-            importCount = 3
-        case "import.five":
-            importCount = 5
-        case "import.ten":
-            importCount = 10
-        default:
-            // 未找到对应的导入次数，完成交易并报错
+        // 首先检查产品ID是否为导入类产品
+        let productType = ProductIdManager.shared.getProductType(for: productId)
+        if productType != .consumable {
+            print("非导入类产品: \(productId)，跳过处理")
             SKPaymentQueue.default().finishTransaction(transaction)
-            
-            DispatchQueue.main.async { [weak self] in
-                self?.purchaseCompletionHandler?(.failure(NSError(domain: "ImportPurchaseService", code: 3, userInfo: [NSLocalizedDescriptionKey: "无效的产品ID"])))
-                self?.purchaseCompletionHandler = nil
-            }
-            
             return
         }
         
-        // 增加用户的导入次数
+        // 根据产品ID确定导入次数
+        var importCount = 1
+        
+        switch productId {
+        case ProductIdManager.shared.importSingle, ProductIdManager.shared.appStoreImportSingle:
+            importCount = 1
+        case ProductIdManager.shared.importThree, ProductIdManager.shared.appStoreImportThree:
+            importCount = 3
+        case ProductIdManager.shared.importFive, ProductIdManager.shared.appStoreImportFive:
+            importCount = 5
+        case ProductIdManager.shared.importTen, ProductIdManager.shared.appStoreImportTen:
+            importCount = 10
+        default:
+            print("未知产品ID: \(productId)")
+            importCount = 1
+        }
+        
+        print("购买导入次数: \(importCount)")
+        
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // 更新用户的导入次数
+            // 始终更新本地存储的导入次数，确保登录状态切换时导入次数一致
+            self.addGuestImportCount(count: importCount)
+            
+            // 如果用户已登录，还需要更新用户对象并同步到服务器
             if let user = self.userManager.currentUser {
-                // 创建更新后的用户对象
+                // 创建更新后的用户对象，使用本地存储的导入次数
                 var updatedUser = user
-                updatedUser.remainingImportCount += importCount
+                let localCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+                updatedUser.remainingImportCount = localCount
                 
                 // 更新用户信息
                 self.userManager.updateUser(updatedUser)
                 
-                // 直接调用完成回调，不再调用refreshUserStatus
-                // 这样避免触发订阅处理逻辑
-                self.purchaseCompletionHandler?(.success(importCount))
-                
-                // 只同步导入次数，不更新订阅状态
-                // 使用单独的API同步导入次数
+                // 如果用户已登录且有token，同步导入次数到服务器
                 if let token = updatedUser.token, !token.isEmpty {
                     DispatchQueue.global().async {
                         // 将数据转换为JSON
@@ -402,10 +430,10 @@ extension ImportPurchaseService: SKPaymentTransactionObserver {
                         .store(in: &self.cancellables)
                     }
                 }
-            } else {
-                // 如果无法获取用户，报错
-                self.purchaseCompletionHandler?(.failure(NSError(domain: "ImportPurchaseService", code: 4, userInfo: [NSLocalizedDescriptionKey: "无法更新用户信息"])))
             }
+            
+            // 调用成功回调
+            self.purchaseCompletionHandler?(.success(importCount))
             
             // 清除完成回调
             self.purchaseCompletionHandler = nil
@@ -413,6 +441,23 @@ extension ImportPurchaseService: SKPaymentTransactionObserver {
         
         // 完成交易
         SKPaymentQueue.default().finishTransaction(transaction)
+    }
+    
+    /// 为Guest用户添加导入次数
+    private func addGuestImportCount(count: Int) {
+        // 从UserDefaults获取现有的导入次数
+        let currentCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+        let actualCurrentCount = currentCount > 0 ? currentCount : 1
+        
+        // 累加新购买的次数
+        let newCount = actualCurrentCount + count
+        
+        // 保存到UserDefaults
+        UserDefaults.standard.set(newCount, forKey: "guestRemainingImportCount")
+        print("已为Guest用户添加导入次数，现有次数: \(newCount)")
+        
+        // 发送通知刷新UI
+        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
     }
     
     /// 处理购买失败的交易

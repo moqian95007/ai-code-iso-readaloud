@@ -6,8 +6,8 @@ struct AboutView: View {
     @ObservedObject private var developerModeManager = DeveloperModeManager.shared
     
     // 版本和构建号
-    private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-    private let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1"
+    private let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "2"
     
     // Toast状态
     @State private var showToast = false
@@ -64,7 +64,7 @@ struct AboutView: View {
                         }
                     }
                     
-                    Link(destination: URL(string: "https://readaloud.imoqian.cn/fwtk.html")!) {
+                    Link(destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!) {
                         HStack {
                             Text("terms_of_service".localized)
                             Spacer()

@@ -136,11 +136,13 @@
 "more_features_coming" = "更多功能敬请期待";
 "more_features_coming_desc" = "我们将持续更新，为您带来更多专属功能";
 "current_plan" = "当前会员: ";
+"current_subscription" = "当前订阅";
+"active" = "已激活";
 "valid_until" = "有效期至: ";
 "manage_subscription" = "管理订阅";
 "select_plan" = "选择套餐";
 "subscribe_now" = "立即订阅";
-"restore_purchase" = "恢复购买";
+"restore_purchases" = "恢复购买";
 "restoring" = "正在恢复购买...";
 "processing_purchase" = "正在处理购买...";
 "loading_products" = "加载产品信息...";
@@ -155,6 +157,21 @@
 "save_20_percent" = "省20%";
 "save_10_percent" = "省10%";
 "no_restorable_purchases" = "未找到可恢复的购买";
+"price_per_month" = "每月 %@";
+"save_percent" = "省%d%%";
+"purchase_success" = "购买成功";
+"restored_subscription" = "已成功恢复%@订阅";
+"no_purchases_to_restore" = "未找到可恢复的购买";
+"processing" = "处理中...";
+"renew_or_upgrade_subscription" = "续订或升级套餐";
+"login_to_sync_subscription" = "登录账号可同步订阅到所有设备";
+
+/* Subscription Types */
+"subscription_none" = "无订阅";
+"subscription_monthly" = "月度会员";
+"subscription_quarterly" = "季度会员";
+"subscription_half_yearly" = "半年会员";
+"subscription_yearly" = "年度会员";
 
 /* Import Purchase */
 "buy_import_count" = "购买导入次数";
@@ -173,7 +190,6 @@
 "purchase_note" = "购买说明";
 "import_purchase_details" = "• 购买的导入次数用于导入本地文档\n• 导入次数没有使用期限\n• PRO会员无需消耗导入次数";
 "syncing_data" = "正在同步数据，请稍候...";
-"purchase_success" = "购买成功";
 "purchased_import_count" = "已成功购买%d次导入机会";
 "please_login_first" = "请先登录再购买导入次数";
 
@@ -208,3 +224,9 @@
 
 /* Account Settings */
 "account_settings" = "账号设置";
+
+/* Login Prompt */
+"login_required_title" = "需要登录";
+"subscription_login_message" = "登录后可以自动同步您的会员订阅信息到所有设备。是否立即登录？";
+"import_login_message" = "登录后可以同步您的导入次数并在所有设备上使用。是否立即登录？";
+"continue_without_login" = "继续购买";

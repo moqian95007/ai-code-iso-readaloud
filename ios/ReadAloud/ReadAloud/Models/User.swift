@@ -11,24 +11,24 @@ public enum SubscriptionType: String, Codable {
     var displayName: String {
         switch self {
         case .none:
-            return "无订阅"
+            return "subscription_none".localized
         case .monthly:
-            return "月度会员"
+            return "subscription_monthly".localized
         case .quarterly:
-            return "季度会员"
+            return "subscription_quarterly".localized
         case .halfYearly:
-            return "半年会员"
+            return "subscription_half_yearly".localized
         case .yearly:
-            return "年度会员"
+            return "subscription_yearly".localized
         }
     }
     
     var simplifiedDisplayName: String {
         switch self {
         case .none:
-            return "无订阅"
+            return "subscription_none".localized
         case .monthly, .quarterly, .halfYearly, .yearly:
-            return "PRO会员"
+            return "pro_member".localized
         }
     }
 }

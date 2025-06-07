@@ -136,11 +136,13 @@
 "more_features_coming" = "More Features Coming Soon";
 "more_features_coming_desc" = "We continuously update with new exclusive features";
 "current_plan" = "Current Plan: ";
+"current_subscription" = "Current Subscription";
+"active" = "Active";
 "valid_until" = "Valid Until: ";
 "manage_subscription" = "Manage Subscription";
 "select_plan" = "Select Plan";
 "subscribe_now" = "Subscribe Now";
-"restore_purchase" = "Restore Purchase";
+"restore_purchases" = "Restore Purchases";
 "restoring" = "Restoring...";
 "processing_purchase" = "Processing purchase...";
 "loading_products" = "Loading products...";
@@ -155,6 +157,21 @@
 "save_20_percent" = "Save 20%";
 "save_10_percent" = "Save 10%";
 "no_restorable_purchases" = "No restorable purchases found";
+"price_per_month" = "%@ per month";
+"save_percent" = "Save %d%%";
+"purchase_success" = "Purchase Successful";
+"restored_subscription" = "Successfully restored %@ subscription";
+"no_purchases_to_restore" = "No purchases to restore";
+"processing" = "Processing...";
+"renew_or_upgrade_subscription" = "Renew or Upgrade Plan";
+"login_to_sync_subscription" = "Login to sync subscription across all devices";
+
+/* Subscription Types */
+"subscription_none" = "No Subscription";
+"subscription_monthly" = "Monthly";
+"subscription_quarterly" = "Quarterly";
+"subscription_half_yearly" = "6-Month";
+"subscription_yearly" = "Annual";
 
 /* Import Purchase */
 "buy_import_count" = "Buy Import Credits";
@@ -172,7 +189,6 @@
 "loading_products" = "Loading products...";
 "purchase_note" = "Purchase Information";
 "import_purchase_details" = "• Import credits are used for importing local documents\n• Import credits never expire\n• PRO members don't need to use import credits";
-"purchase_success" = "Purchase Successful";
 "purchased_import_count" = "Successfully purchased %d import credits";
 "please_login_first" = "Please log in before purchasing import credits";
 
@@ -207,3 +223,9 @@
 
 /* Account Settings */
 "account_settings" = "Account Settings";
+
+/* Login Prompt */
+"login_required_title" = "Login Recommended";
+"subscription_login_message" = "Logging in allows you to sync your subscription across all your devices. Would you like to log in now?";
+"import_login_message" = "Logging in allows you to sync your import credits and use them on all your devices. Would you like to log in now?";
+"continue_without_login" = "Continue";

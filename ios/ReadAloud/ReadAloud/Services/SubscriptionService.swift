@@ -120,55 +120,23 @@ class SubscriptionService: ObservableObject {
     ///   - productId: 产品ID
     ///   - completion: 完成回调
     func purchaseSubscription(productId: String, completion: @escaping (Result<SubscriptionType, Error>) -> Void) {
-        // 确保用户已登录
-        guard userManager.isLoggedIn, let user = userManager.currentUser else {
-            completion(.failure(NSError(domain: "SubscriptionService", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先登录再订阅会员"])))
-            return
-        }
-        
-        // 使用订阅管理器购买 - 直接传递完成回调，不需要额外操作
-        // 因为SubscriptionManager已经会在处理交易时创建订阅记录
+        // 直接调用订阅管理器的购买方法，不再检查用户登录状态
         subscriptionManager.purchaseSubscription(productId: productId, completion: completion)
-        
-        // 不再需要以下代码，避免重复创建订阅记录
-        /*
-        subscriptionManager.purchaseSubscription(productId: productId) { [weak self] result in
-            switch result {
-            case .success(let subscriptionType):
-                // 创建新的订阅记录
-                self?.createSubscriptionRecord(for: user.id, type: subscriptionType, productId: productId)
-                completion(.success(subscriptionType))
-            case .failure(let error):
-                completion(.failure(error))
-            }
-        }
-        */
     }
     
     /// 恢复购买
     /// - Parameter completion: 完成回调
     func restorePurchases(completion: @escaping (Result<SubscriptionType?, Error>) -> Void) {
+        // 防止重复恢复处理
+        if isProcessingRestore {
+            completion(.failure(NSError(domain: "SubscriptionService", code: 2, userInfo: [NSLocalizedDescriptionKey: "正在处理恢复操作，请稍候再试"])))
+            return
+        }
+        
+        isProcessingRestore = true
         print("========== SubscriptionService.restorePurchases 开始 ==========")
         
-        // 确保用户已登录
-        guard userManager.isLoggedIn, let user = userManager.currentUser else {
-            print("用户未登录，无法恢复购买")
-            completion(.failure(NSError(domain: "SubscriptionService", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先登录再恢复购买"])))
-            return
-        }
-        
-        print("用户已登录，用户ID: \(user.id), 用户名: \(user.username)")
-        
-        // 检查是否已经在处理恢复购买，避免重复处理
-        if isProcessingRestore {
-            print("警告: 已经在处理恢复购买，忽略重复请求")
-            return
-        }
-        
-        // 标记开始处理恢复购买
-        isProcessingRestore = true
-        
-        // 使用订阅管理器恢复购买
+        // 直接调用订阅管理器的恢复购买方法，不再检查用户登录状态
         subscriptionManager.restorePurchases { [weak self] result in
             guard let self = self else { return }
             
@@ -178,48 +146,7 @@ class SubscriptionService: ObservableObject {
                 print("========== SubscriptionService.restorePurchases 结束 ==========")
             }
             
-            switch result {
-            case .success(let subscriptionType):
-                print("恢复购买成功，订阅类型: \(String(describing: subscriptionType))")
-                
-                if let type = subscriptionType, type != .none {
-                    print("有效的订阅类型: \(type.rawValue)")
-                    
-                    // 获取用户现有的订阅
-                    let existingSubscriptions = SubscriptionRepository.shared.getSubscriptions(for: user.id)
-                    
-                    // 检查是否已有相同类型的活跃订阅
-                    let hasActiveSubscription = existingSubscriptions.contains { 
-                        $0.type == type && $0.isActive && $0.isValid 
-                    }
-                    
-                    if !hasActiveSubscription {
-                        print("未发现相同类型的活跃订阅，创建新的订阅记录")
-                        // 创建恢复的订阅记录
-                        self.createSubscriptionRecord(for: user.id, type: type, productId: "restored_\(type.rawValue)")
-                        print("已创建恢复的订阅记录，用户ID: \(user.id), 类型: \(type.rawValue)")
-                        // 注意：createSubscriptionRecord会调用addSubscription，会自动触发同步
-                    } else {
-                        print("已存在相同类型的活跃订阅，跳过创建")
-                        // 已存在相同类型的活跃订阅，需要手动触发同步
-                        // 因为没有调用addSubscription，所以需要手动同步
-                        SubscriptionRepository.shared.syncSubscriptionsToRemote()
-                    }
-                    
-                    // 发送订阅状态更新通知，确保UI更新
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-                        print("已发送订阅状态更新通知")
-                    }
-                } else {
-                    print("没有找到有效的订阅")
-                }
-                
-                completion(.success(subscriptionType))
-            case .failure(let error):
-                print("恢复购买失败: \(error.localizedDescription)")
-                completion(.failure(error))
-            }
+            completion(result)
         }
     }
     

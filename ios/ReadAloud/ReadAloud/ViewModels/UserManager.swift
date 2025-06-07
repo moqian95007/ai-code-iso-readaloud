@@ -79,7 +79,10 @@ class UserManager: ObservableObject {
                     self?.isLoggedIn = true
                     self?.saveUserToStorage(user: user)
                     
-                    // 登录成功后，先从远程同步数据到本地，然后再同步本地数据到远程
+                    // 登录成功后，先从本地同步导入次数到用户对象
+                    self?.syncLocalImportCountToUser(user: user)
+                    
+                    // 然后从远程同步数据到本地，最后同步本地数据到远程
                     self?.syncRemoteDataToLocal(user: user) { [weak self] in
                         // 完成从远程同步后，再同步本地数据到远程
                         self?.syncLocalDataToRemote(user: user) {
@@ -144,7 +147,10 @@ class UserManager: ObservableObject {
                     self?.isLoggedIn = true
                     self?.saveUserToStorage(user: user)
                     
-                    // 登录成功后，先从远程同步数据到本地，然后再同步本地数据到远程
+                    // 登录成功后，先从本地同步导入次数到用户对象
+                    self?.syncLocalImportCountToUser(user: user)
+                    
+                    // 然后从远程同步数据到本地，最后同步本地数据到远程
                     self?.syncRemoteDataToLocal(user: user) { [weak self] in
                         // 完成从远程同步后，再同步本地数据到远程
                         self?.syncLocalDataToRemote(user: user) {
@@ -503,7 +509,10 @@ class UserManager: ObservableObject {
                                 self.currentUser = user
                                 self.isLoggedIn = true
                                 self.saveUserToStorage(user: user)
-                    
+                                
+                                // 同步Guest导入次数到用户账户
+                                self.syncGuestImportCountOnLogin()
+                                
                                 // 从远程同步用户数据
                                 print("开始从远程同步用户数据")
                                 self.syncRemoteDataToLocal(user: user)
@@ -576,6 +585,9 @@ class UserManager: ObservableObject {
                                 self.currentUser = user
                                 self.isLoggedIn = true
                                 self.saveUserToStorage(user: user)
+                                
+                                // 同步Guest导入次数到用户账户
+                                self.syncGuestImportCountOnLogin()
                                 
                                 // 从远程同步用户数据
                                 print("开始从远程同步用户数据")
@@ -703,6 +715,20 @@ class UserManager: ObservableObject {
         // 保存当前用户ID用于清除订阅数据
         let currentUserId = currentUser?.id
         
+        // 保存用户退出前的订阅状态，用于未登录状态下判断是否有会员
+        let hadPremiumAccess = SubscriptionChecker.shared.hasPremiumAccess
+        
+        // 保存用户的导入次数到本地
+        if let user = currentUser, user.remainingImportCount > 0 {
+            // 从UserDefaults获取当前导入次数
+            let currentCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+            // 如果用户对象中的导入次数更多，则更新本地存储
+            if user.remainingImportCount > currentCount {
+                print("将用户导入次数同步到本地: 用户=\(user.remainingImportCount), 本地=\(currentCount)")
+                UserDefaults.standard.set(user.remainingImportCount, forKey: "guestRemainingImportCount")
+            }
+        }
+        
         // 先同步本地数据到远程服务器，除非指定跳过
         if !skipDataSync, let user = currentUser, user.id > 0, let token = user.token {
             print("登出前先同步本地数据到远程服务器")
@@ -777,7 +803,13 @@ class UserManager: ObservableObject {
         isLoggedIn = false
         clearUserFromStorage()
         
-        // 清除订阅数据
+        // 如果用户有PRO会员，保存到UserDefaults中，供未登录时使用
+        if hadPremiumAccess {
+            print("用户有PRO会员权限，保存到Guest状态")
+            UserDefaults.standard.set(true, forKey: "guestHasPremiumAccess")
+        }
+        
+        // 清除订阅数据，但保留订阅状态
         if let userId = currentUserId, userId > 0 {
             print("清除用户ID为\(userId)的订阅数据")
             SubscriptionRepository.shared.clearSubscriptions(for: userId)
@@ -1561,61 +1593,72 @@ class UserManager: ObservableObject {
     /// - Parameter completion: 操作完成的回调，返回布尔值表示操作是否成功
     /// - Returns: 操作是否成功
     func decreaseRemainingImportCount(completion: ((Bool) -> Void)? = nil) -> Bool {
-        guard var user = currentUser else {
-            print("减少导入次数失败: 当前用户为空")
-            completion?(false)
-            return false
-        }
-        
-        // 如果用户有订阅，不减少导入数量
-        if user.hasActiveSubscription {
-            print("用户有活跃订阅，不减少导入次数")
-            completion?(true)
+        // 已登录用户
+        if let user = currentUser {
+            // 如果用户有订阅，不减少导入数量
+            if user.hasActiveSubscription {
+                print("用户有活跃订阅，不减少导入次数")
+                completion?(true)
+                return true
+            }
+            
+            print("当前剩余导入次数: \(user.remainingImportCount)")
+            
+            // 如果剩余导入数为0，则不能再减少
+            if user.remainingImportCount <= 0 {
+                print("剩余导入次数已为0，无法减少")
+                completion?(false)
+                return false
+            }
+            
+            // 减少导入数量
+            var updatedUser = user
+            updatedUser.remainingImportCount -= 1
+            print("减少后的导入次数: \(updatedUser.remainingImportCount)")
+            
+            // 更新用户数据
+            currentUser = updatedUser
+            saveUserToStorage(user: updatedUser)
+            print("已更新本地用户数据")
+            
+            // 立即发送通知刷新UI
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
+                print("本地减少导入次数后立即发送通知刷新UI")
+            }
+            
+            // 如果用户已登录，同步数据到远程
+            if updatedUser.isTokenValid && updatedUser.id > 0 {
+                print("开始同步剩余导入次数到远程")
+                syncRemainingImportCount(user: updatedUser) { success in
+                    print("同步导入次数到远程完成，结果: \(success ? "成功" : "失败")")
+                    // 仅在同步失败时才回调失败状态
+                    if !success {
+                        completion?(false)
+                    } else {
+                        completion?(true)
+                    }
+                }
+            } else {
+                print("用户未登录或ID无效，跳过远程同步")
+                completion?(true) // 本地更新成功即视为成功
+            }
+            
             return true
-        }
-        
-        print("当前剩余导入次数: \(user.remainingImportCount)")
-        
-        // 如果剩余导入数为0，则不能再减少
-        if user.remainingImportCount <= 0 {
-            print("剩余导入次数已为0，无法减少")
-            completion?(false)
-            return false
-        }
-        
-        // 减少导入数量
-        user.remainingImportCount -= 1
-        print("减少后的导入次数: \(user.remainingImportCount)")
-        
-        // 更新用户数据
-        currentUser = user
-        saveUserToStorage(user: user)
-        print("已更新本地用户数据")
-        
-        // 立即发送通知刷新UI
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
-            print("本地减少导入次数后立即发送通知刷新UI")
-        }
-        
-        // 如果用户已登录，同步数据到远程
-        if user.isTokenValid && user.id > 0 {
-            print("开始同步剩余导入次数到远程")
-            syncRemainingImportCount(user: user) { success in
-                print("同步导入次数到远程完成，结果: \(success ? "成功" : "失败")")
-                // 仅在同步失败时才回调失败状态
-                if !success {
-                    completion?(false)
-                } else {
-                    completion?(true)
+        } else {
+            // 未登录用户，调用Guest导入次数减少方法
+            let success = decreaseGuestRemainingImportCount()
+            
+            // 立即发送通知刷新UI
+            if success {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: NSNotification.Name("SubscriptionStatusUpdated"), object: nil)
                 }
             }
-        } else {
-            print("用户未登录或ID无效，跳过远程同步")
-            completion?(true) // 本地更新成功即视为成功
+            
+            completion?(success)
+            return success
         }
-        
-        return true
     }
     
     /// 将导入数量同步到远程，并等待同步完成
@@ -1796,5 +1839,133 @@ class UserManager: ObservableObject {
                 }
             )
             .store(in: &cancellables)
+    }
+    
+    /// 获取剩余导入次数
+    /// - Returns: 剩余的导入次数
+    func getRemainingImportCount() -> Int {
+        // 始终优先使用本地存储的导入次数
+        let localImportCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+        let localCount = localImportCount > 0 ? localImportCount : 1
+        
+        // 如果用户已登录，取用户对象和本地中较大的值
+        if let user = currentUser {
+            return max(user.remainingImportCount, localCount)
+        }
+        // 用户未登录，使用本地导入次数
+        else {
+            return localCount
+        }
+    }
+    
+    /// 减少Guest用户的导入次数
+    /// - Returns: 操作是否成功
+    private func decreaseGuestRemainingImportCount() -> Bool {
+        // 获取Guest用户的导入次数
+        let remainingImports = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+        let actualRemainingImports = remainingImports > 0 ? remainingImports : 1
+        
+        // 如果Guest用户有订阅，不减少导入数量
+        if SubscriptionChecker.shared.hasPremiumAccess {
+            print("Guest用户有活跃订阅，不减少导入次数")
+            return true
+        }
+        
+        // 如果剩余导入数为0，则不能再减少
+        if actualRemainingImports <= 0 {
+            print("Guest用户剩余导入次数已为0，无法减少")
+            return false
+        }
+        
+        // 减少导入数量
+        let newRemainingImports = actualRemainingImports - 1
+        UserDefaults.standard.set(newRemainingImports, forKey: "guestRemainingImportCount")
+        print("Guest用户减少后的导入次数: \(newRemainingImports)")
+        
+        return true
+    }
+    
+    /// 处理用户登录/登出时的导入次数同步
+    func syncGuestImportCountOnLogin() {
+        // 从UserDefaults获取Guest导入次数
+        let guestImportCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+        
+        // 只有当Guest有额外导入次数时才处理
+        if guestImportCount > 1 && currentUser != nil {
+            // 用户登录后，将Guest导入次数添加到用户账户中
+            let additionalCount = guestImportCount - 1 // 减去初始的1次
+            
+            if additionalCount > 0 {
+                print("同步Guest导入次数到用户账户: +\(additionalCount)")
+                increaseRemainingImportCount(by: additionalCount)
+                
+                // 重置Guest导入次数
+                UserDefaults.standard.set(1, forKey: "guestRemainingImportCount")
+            }
+        }
+    }
+    
+    /// 增加用户剩余导入次数
+    /// - Parameter count: 要增加的次数
+    /// - Returns: 操作是否成功
+    func increaseRemainingImportCount(by count: Int) -> Bool {
+        // 检查用户是否已登录
+        guard let user = currentUser else {
+            // 未登录用户，将次数存储到UserDefaults
+            let currentCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+            let newCount = max(1, currentCount) + count
+            UserDefaults.standard.set(newCount, forKey: "guestRemainingImportCount")
+            print("增加Guest用户导入次数: +\(count)，当前总计: \(newCount)")
+            return true
+        }
+        
+        // 已登录用户，更新用户对象
+        var updatedUser = user
+        updatedUser.remainingImportCount += count
+        print("增加用户导入次数: +\(count)，当前总计: \(updatedUser.remainingImportCount)")
+        
+        // 更新用户数据
+        currentUser = updatedUser
+        saveUserToStorage(user: updatedUser)
+        
+        // 同步到远程服务器
+        if updatedUser.isTokenValid && updatedUser.id > 0 {
+            syncRemainingImportCount(user: updatedUser) { _ in }
+        }
+        
+        return true
+    }
+    
+    // MARK: - 数据同步
+    
+    /// 从本地同步导入次数到用户对象
+    /// - Parameter user: 用户对象
+    private func syncLocalImportCountToUser(user: User) {
+        // 获取本地存储的导入次数
+        let localImportCount = UserDefaults.standard.integer(forKey: "guestRemainingImportCount")
+        if localImportCount > 0 {
+            // 创建更新后的用户对象
+            var updatedUser = user
+            
+            // 如果本地导入次数大于用户对象中的导入次数，则使用本地导入次数
+            if localImportCount > updatedUser.remainingImportCount {
+                print("从本地同步导入次数到用户对象: 本地=\(localImportCount), 用户=\(updatedUser.remainingImportCount)")
+                updatedUser.remainingImportCount = localImportCount
+                
+                // 更新用户信息
+                self.updateUser(updatedUser)
+                
+                // 同步更新后的导入次数到服务器
+                if let token = updatedUser.token, !token.isEmpty {
+                    syncRemainingImportCount(user: updatedUser) { success in
+                        if success {
+                            print("成功同步本地导入次数到服务器")
+                        } else {
+                            print("同步本地导入次数到服务器失败")
+                        }
+                    }
+                }
+            }
+        }
     }
 } 

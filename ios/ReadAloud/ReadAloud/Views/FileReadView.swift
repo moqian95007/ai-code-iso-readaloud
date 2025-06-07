@@ -366,13 +366,30 @@ struct ImportButton: View {
         Button(action: {
             print("点击了导入按钮")
             
-            // 检查用户是否登录，如果未登录但已有文档，则要求登录
+            // 1. 检查用户是否未登录且导入次数不足且没有订阅会员
             if !userManager.isLoggedIn {
                 // 检查未登录用户已导入的文档数量
                 if documentLibrary.documents.count >= 1 {
-                    // 未登录用户已有一个文档，显示登录提示
-                    showLoginAlert = true
-                    return
+                    // 检查是否有本地订阅（未登录用户）
+                    let hasLocalSubscription = SubscriptionChecker.shared.hasPremiumAccess
+                    
+                    if hasLocalSubscription {
+                        // 未登录但有订阅，允许导入
+                        print("未登录用户有本地订阅，允许导入")
+                    } else {
+                        // 检查未登录用户的剩余导入次数
+                        let remainingImportCount = UserDefaults.standard.integer(forKey: "remainingImportCount")
+                        print("未登录用户剩余导入次数: \(remainingImportCount)")
+                        
+                        if remainingImportCount > 0 {
+                            // 未登录但有剩余导入次数，允许导入
+                            print("未登录用户有剩余导入次数，允许导入")
+                        } else {
+                            // 未登录且没有订阅且没有剩余导入次数，显示登录提示
+                            showLoginAlert = true
+                            return
+                        }
+                    }
                 } else {
                     // 未登录用户没有文档，允许导入一个
                     print("未登录用户首次导入文档，允许操作")
